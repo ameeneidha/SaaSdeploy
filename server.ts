@@ -1,3 +1,6 @@
+import dotenv from "dotenv";
+dotenv.config();
+
 import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
@@ -8,10 +11,7 @@ import { createServer } from "http";
 import { GoogleGenAI } from "@google/genai";
 import OpenAI from "openai";
 import Stripe from "stripe";
-import dotenv from "dotenv";
 import axios from "axios";
-
-dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -88,6 +88,14 @@ async function startServer() {
     }
   });
   const PORT = 3000;
+
+  app.get("/health", (req, res) => {
+    res.send("OK");
+  });
+
+  app.get("/api/ping", (req, res) => {
+    res.json({ status: "ok", time: new Date().toISOString() });
+  });
 
   // Stripe Webhook
   app.post("/api/webhooks/stripe", express.raw({ type: 'application/json' }), async (req, res) => {
