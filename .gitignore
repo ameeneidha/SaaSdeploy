@@ -1,0 +1,12 @@
+node_modules/
+build/
+dist/
+coverage/
+.DS_Store
+*.log
+.env*
+!.env.example
+prisma/*.bak
+prisma/prisma/
+prisma/test.db
+prisma/*.db-journal
