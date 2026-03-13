@@ -5,12 +5,15 @@ import AppLayout from './layouts/AppLayout';
 import Login from './pages/Login';
 import Home from './pages/Home';
 import Register from './pages/Register';
+import ForgotPassword from './pages/ForgotPassword';
+import ResetPassword from './pages/ResetPassword';
 import About from './pages/About';
 import Careers from './pages/Careers';
 import Changelog from './pages/Changelog';
 import Inbox from './pages/Inbox';
 import Compose from './pages/Compose';
 import Broadcast from './pages/Broadcast';
+import Dashboard from './pages/Dashboard';
 import Templates from './pages/Templates';
 import Chatbots from './pages/Chatbots';
 import Channels from './pages/Channels';
@@ -38,16 +41,19 @@ export default function App() {
             <Route path="/" element={<Home />} />
             <Route path="/login" element={<Login />} />
             <Route path="/register" element={<Register />} />
+            <Route path="/forgot-password" element={<ForgotPassword />} />
+            <Route path="/reset-password" element={<ResetPassword />} />
             <Route path="/signin" element={<Navigate to="/login" replace />} />
             <Route path="/signup" element={<Navigate to="/register" replace />} />
-            <Route path="/dashboard" element={<Navigate to="/app/inbox" replace />} />
+            <Route path="/dashboard" element={<Navigate to="/app/dashboard" replace />} />
             <Route path="/about" element={<About />} />
             <Route path="/careers" element={<Careers />} />
             <Route path="/privacy" element={<Privacy />} />
             <Route path="/terms" element={<Terms />} />
             <Route path="/changelog" element={<Changelog />} />
             <Route path="/app" element={<AppLayout />}>
-              <Route index element={<Navigate to="/app/inbox" replace />} />
+              <Route index element={<Navigate to="/app/dashboard" replace />} />
+              <Route path="dashboard" element={<Dashboard />} />
               <Route path="inbox" element={<Inbox />} />
               <Route path="compose" element={<Compose />} />
               <Route path="broadcast" element={<Broadcast />} />

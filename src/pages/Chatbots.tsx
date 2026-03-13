@@ -23,6 +23,9 @@ import { cn } from '../lib/utils';
 import * as Switch from '@radix-ui/react-switch';
 import { toast } from 'sonner';
 
+const FIXED_CHATBOT_MODEL = 'gpt-5-nano';
+const FIXED_CHATBOT_MODEL_LABEL = 'GPT-5 nano (default low-cost model)';
+
 export default function Chatbots() {
   const { activeWorkspace } = useApp();
   const [chatbots, setChatbots] = useState<any[]>([]);
@@ -64,7 +67,7 @@ export default function Chatbots() {
         workspaceId: activeWorkspace?.id,
         name: 'New AI Assistant',
         instructions: 'You are a helpful assistant.',
-        model: 'gpt-4o-mini'
+        model: FIXED_CHATBOT_MODEL
       });
       setChatbots([...chatbots, res.data]);
       setSelectedBot(res.data);
@@ -183,7 +186,6 @@ function ChatbotConfig({ bot, onBack }: { bot: any, onBack: () => void }) {
   
   const [name, setName] = useState(bot.name);
   const [instructions, setInstructions] = useState(bot.instructions);
-  const [model, setModel] = useState(bot.model || 'gpt-4o-mini');
   const [language, setLanguage] = useState(bot.language || 'en');
   const [enabled, setEnabled] = useState(bot.enabled);
 
@@ -193,7 +195,7 @@ function ChatbotConfig({ bot, onBack }: { bot: any, onBack: () => void }) {
       await axios.patch(`/api/chatbots/${bot.id}`, {
         name,
         instructions,
-        model,
+        model: FIXED_CHATBOT_MODEL,
         language,
         enabled
       });
@@ -310,24 +312,15 @@ function ChatbotConfig({ bot, onBack }: { bot: any, onBack: () => void }) {
                   />
                 </div>
                 <div className="space-y-2">
-                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">AI Model</label>
-                  <select 
-                    value={model}
-                    onChange={(e) => setModel(e.target.value)}
-                    className="w-full px-4 py-2 bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-xl outline-none text-gray-900 dark:text-white transition-colors"
-                  >
-                    <optgroup label="OpenAI">
-                      <option value="gpt-4o-mini">GPT-4o Mini (Fast & Cheap)</option>
-                      <option value="gpt-4o">GPT-4o (Powerful)</option>
-                      <option value="gpt-5-nano">GPT-5 Nano (Experimental)</option>
-                    </optgroup>
-                    <optgroup label="Google Gemini">
-                      <option value="gemini-1.5-flash">Gemini 1.5 Flash (Fast)</option>
-                      <option value="gemini-1.5-pro">Gemini 1.5 Pro (Advanced)</option>
-                    </optgroup>
-                  </select>
+                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">AI Engine</label>
+                  <input
+                    type="text"
+                    value={FIXED_CHATBOT_MODEL_LABEL}
+                    readOnly
+                    className="w-full px-4 py-2 bg-gray-100 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-xl outline-none text-gray-600 dark:text-gray-300 transition-colors cursor-not-allowed"
+                  />
                   <p className="text-[10px] text-gray-400 dark:text-gray-500">
-                    Select the AI engine that powers this chatbot. OpenAI models require an OpenAI API Key.
+                    All chatbots use the same low-cost AI engine by default to keep usage simple and predictable.
                   </p>
                 </div>
                 <div className="space-y-2">

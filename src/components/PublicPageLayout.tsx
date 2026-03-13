@@ -33,7 +33,7 @@ export default function PublicPageLayout({
               <MessageSquare className="h-5 w-5 text-white" />
             </div>
             <div>
-              <div className="text-lg font-semibold tracking-tight">WABA Hub</div>
+              <div className="text-lg font-semibold tracking-tight">Tawasel App</div>
               <div className="text-xs text-slate-400">WhatsApp-first customer operations</div>
             </div>
           </Link>

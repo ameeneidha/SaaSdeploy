@@ -5,7 +5,7 @@ export default function Terms() {
     <PublicPageLayout
       eyebrow="Legal"
       title="Terms of Service"
-      description="These summary terms explain the baseline rules for using WABA Hub, including account responsibility, subscription behavior, and acceptable use of connected messaging channels."
+      description="These summary terms explain the baseline rules for using Tawasel App, including account responsibility, subscription behavior, and acceptable use of connected messaging channels."
       sections={[
         {
           title: 'Accounts and workspace responsibility',

@@ -8,6 +8,7 @@ import {
   Zap, 
   Hash, 
   LayoutGrid,
+  BarChart3,
   Users, 
   Settings,
   LogOut,
@@ -31,6 +32,7 @@ import { motion } from 'motion/react';
 import AppTooltip from './AppTooltip';
 
 const navItems = [
+  { icon: BarChart3, label: 'Dashboard', path: '/app/dashboard' },
   { icon: MessageSquare, label: 'Inbox', path: '/app/inbox' },
   { icon: LayoutGrid, label: 'CRM Pipeline', path: '/app/crm' },
   { icon: ContactRound, label: 'Contacts', path: '/app/contacts' },
@@ -52,7 +54,7 @@ export default function Sidebar() {
     <div className="w-20 bg-white dark:bg-slate-900 border-r border-gray-100 dark:border-slate-800 flex flex-col items-center py-6 h-screen sticky top-0 transition-colors">
       <div className="mb-8">
         <div className="w-10 h-10 bg-[#25D366] rounded-xl flex items-center justify-center text-white font-bold text-xl">
-          O
+          T
         </div>
       </div>
 
@@ -205,8 +207,8 @@ export default function Sidebar() {
               <DropdownMenu.Separator className="h-px bg-gray-100 dark:bg-slate-800 my-1" />
 
               <div className="px-3 py-2 text-[10px] text-gray-400 text-center">
-                <p>© {new Date().getFullYear()} WABA Hub</p>
-                <p>Created by <a href="https://quantops.ae" target="_blank" rel="noopener noreferrer" className="text-[#25D366] hover:underline">Quantops.ae</a></p>
+                <p>© {new Date().getFullYear()} Tawasel App</p>
+                <p>Created by <a href="https://tawasel.io" target="_blank" rel="noopener noreferrer" className="text-[#25D366] hover:underline">tawasel.io</a></p>
               </div>
 
               <DropdownMenu.Separator className="h-px bg-gray-100 dark:bg-slate-800 my-1" />

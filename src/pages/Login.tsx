@@ -15,7 +15,7 @@ export default function Login() {
 
   useEffect(() => {
     if (user) {
-      navigate('/app/inbox');
+      navigate('/app/dashboard');
     }
   }, [user, navigate]);
 
@@ -26,7 +26,7 @@ export default function Login() {
     try {
       const res = await axios.post('/api/auth/login', { email, password });
       setUser(res.data.user, res.data.token);
-      navigate('/app/inbox');
+      navigate('/app/dashboard');
     } catch (err: any) {
       setError(err.response?.data?.error || 'Login failed');
     } finally {
@@ -46,7 +46,7 @@ export default function Login() {
             <LogIn className="w-6 h-6 text-[#25D366]" />
           </div>
           <h1 className="text-2xl font-semibold text-gray-900 dark:text-white">Welcome Back</h1>
-          <p className="text-gray-500 dark:text-gray-400 mt-2">Sign in to your WhatsApp operations hub</p>
+          <p className="text-gray-500 dark:text-gray-400 mt-2">Sign in to your Tawasel App workspace</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-6">
@@ -66,7 +66,12 @@ export default function Login() {
           </div>
 
           <div className="space-y-2">
-            <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Password</label>
+            <div className="flex items-center justify-between gap-3">
+              <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Password</label>
+              <Link to="/forgot-password" className="text-xs font-semibold text-[#25D366] transition-colors hover:text-[#128C7E]">
+                Forgot password?
+              </Link>
+            </div>
             <div className="relative">
               <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 dark:text-gray-500" />
               <input

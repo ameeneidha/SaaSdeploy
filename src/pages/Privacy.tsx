@@ -5,12 +5,12 @@ export default function Privacy() {
     <PublicPageLayout
       eyebrow="Privacy"
       title="Privacy Policy"
-      description="This page explains the categories of data WABA Hub processes, how that data supports the service, and the controls teams should expect when operating inside the platform."
+      description="This page explains the categories of data Tawasel App processes, how that data supports the service, and the controls teams should expect when operating inside the platform."
       sections={[
         {
           title: 'Information we process',
           paragraphs: [
-            'WABA Hub processes account details, workspace settings, billing metadata, and conversation data that users choose to connect through supported channels.',
+            'Tawasel App processes account details, workspace settings, billing metadata, and conversation data that users choose to connect through supported channels.',
             'We also store operational metadata such as plan selections, workspace membership, chatbot configuration, and usage records needed to keep the service running.',
           ],
           bullets: [

@@ -462,7 +462,11 @@ export default function Inbox() {
           senderType: m.senderType
         }));
       
-      const data = await generateReplySuggestions(history);
+      if (!activeWorkspace?.id) {
+        throw new Error('Workspace is required to generate AI suggestions');
+      }
+
+      const data = await generateReplySuggestions(activeWorkspace.id, history);
       setSuggestions(data);
     } catch (error) {
       console.error('Failed to fetch suggestions', error);
@@ -501,7 +505,11 @@ export default function Inbox() {
           senderType: m.senderType
         }));
       
-      const summaryText = await summarizeConversation(history);
+      if (!activeWorkspace?.id) {
+        throw new Error('Workspace is required to generate AI summary');
+      }
+
+      const summaryText = await summarizeConversation(activeWorkspace.id, history);
       setSummary(summaryText);
     } catch (error) {
       console.error('Failed to fetch summary', error);

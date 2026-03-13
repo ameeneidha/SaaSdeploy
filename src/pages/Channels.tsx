@@ -28,6 +28,8 @@ export default function Channels() {
   const [numbers, setNumbers] = useState<any[]>([]);
   const [instagramAccounts, setInstagramAccounts] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isConnectingWhatsApp, setIsConnectingWhatsApp] = useState(false);
+  const [isFinalizingWhatsApp, setIsFinalizingWhatsApp] = useState(false);
 
   const currentPlan = activeWorkspace?.plan || 'NONE';
   const planInfo = getPlanConfig(currentPlan) || PLANS.STARTER;
@@ -44,6 +46,67 @@ export default function Channels() {
     }
   }, [activeWorkspace]);
 
+  useEffect(() => {
+    const handleEmbeddedSignupMessage = async (event: MessageEvent) => {
+      if (event.origin !== window.location.origin) return;
+      if (event.data?.type !== 'meta-embedded-signup') return;
+      if (!activeWorkspace?.id) return;
+
+      const payload = event.data.payload;
+      if (!payload?.success) {
+        toast.error(payload?.error || 'WhatsApp Embedded Signup was not completed');
+        return;
+      }
+
+      const phoneNumbers = Array.isArray(payload.phoneNumbers) ? payload.phoneNumbers : [];
+      const selectedPhone = phoneNumbers[0];
+
+      if (!selectedPhone?.phoneNumberId || !selectedPhone?.displayPhoneNumber || !payload?.accessToken) {
+        toast.error('Meta did not return a usable WhatsApp phone number');
+        return;
+      }
+
+      if (payload.workspaceId && payload.workspaceId !== activeWorkspace.id) {
+        toast.error('This WhatsApp connection belongs to a different workspace');
+        return;
+      }
+
+      setIsFinalizingWhatsApp(true);
+      try {
+        await axios.post('/api/meta/embedded-signup/finalize', {
+          workspaceId: activeWorkspace.id,
+          phoneNumberId: selectedPhone.phoneNumberId,
+          displayPhoneNumber: selectedPhone.displayPhoneNumber,
+          wabaId: selectedPhone.wabaId,
+          businessId: payload.businessId,
+          accessToken: payload.accessToken,
+          tokenExpiresAt: payload.tokenExpiresAt,
+          verifiedName: selectedPhone.verifiedName,
+          businessName: selectedPhone.businessName,
+          name: selectedPhone.verifiedName || selectedPhone.businessName || selectedPhone.displayPhoneNumber,
+        });
+
+        await fetchChannels();
+        toast.success(`Connected ${selectedPhone.displayPhoneNumber}`);
+
+        if (phoneNumbers.length > 1) {
+          toast.info('Multiple WhatsApp numbers were returned, so the first available number was connected.');
+        }
+      } catch (error) {
+        if (axios.isAxiosError(error)) {
+          toast.error(error.response?.data?.error || 'Could not save WhatsApp channel');
+        } else {
+          toast.error('Could not save WhatsApp channel');
+        }
+      } finally {
+        setIsFinalizingWhatsApp(false);
+      }
+    };
+
+    window.addEventListener('message', handleEmbeddedSignupMessage);
+    return () => window.removeEventListener('message', handleEmbeddedSignupMessage);
+  }, [activeWorkspace?.id]);
+
   const fetchChannels = async () => {
     setIsLoading(true);
     try {
@@ -57,6 +120,56 @@ export default function Channels() {
       console.error('Failed to fetch channels', error);
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleConnectWhatsApp = async () => {
+    if (waLimitReached) {
+      toast.error(`Limit reached for ${planInfo.name} plan`);
+      return;
+    }
+
+    if (!activeWorkspace?.id) {
+      toast.error('Choose a workspace before connecting WhatsApp');
+      return;
+    }
+
+    setIsConnectingWhatsApp(true);
+    const popup = window.open(
+      '',
+      'meta-whatsapp-embedded-signup',
+      'width=520,height=760,scrollbars=yes,resizable=yes'
+    );
+
+    if (!popup) {
+      setIsConnectingWhatsApp(false);
+      toast.error('Popup was blocked. Allow popups and try again.');
+      return;
+    }
+
+    popup.document.write('<p style="font-family:Arial,sans-serif;padding:24px;">Opening Meta WhatsApp signup...</p>');
+    try {
+      const response = await axios.get(`/api/meta/embedded-signup/start?workspaceId=${activeWorkspace.id}`);
+      const signupUrl = response.data?.url;
+
+      if (!signupUrl) {
+        popup.close();
+        toast.error('Embedded Signup is not configured yet');
+        return;
+      }
+
+      popup.location.href = signupUrl;
+      popup.focus();
+      toast.info('Complete the Meta WhatsApp flow in the popup window.');
+    } catch (error) {
+      popup.close();
+      if (axios.isAxiosError(error)) {
+        toast.error(error.response?.data?.error || 'Could not start WhatsApp Embedded Signup');
+      } else {
+        toast.error('Could not start WhatsApp Embedded Signup');
+      }
+    } finally {
+      setIsConnectingWhatsApp(false);
     }
   };
 
@@ -90,15 +203,21 @@ export default function Channels() {
               Connect Instagram
             </button>
             <button 
-              disabled={waLimitReached}
-              onClick={() => waLimitReached ? toast.error(`Limit reached for ${planInfo.name} plan`) : null}
+              disabled={waLimitReached || isConnectingWhatsApp || isFinalizingWhatsApp}
+              onClick={handleConnectWhatsApp}
               className={cn(
                 "flex items-center gap-2 px-4 py-2 text-white font-medium rounded-xl transition-all shadow-sm",
-                waLimitReached ? "bg-gray-300 dark:bg-slate-800 cursor-not-allowed" : "bg-[#25D366] hover:bg-[#128C7E]"
+                waLimitReached || isConnectingWhatsApp || isFinalizingWhatsApp
+                  ? "bg-gray-300 dark:bg-slate-800 cursor-not-allowed"
+                  : "bg-[#25D366] hover:bg-[#128C7E]"
               )}
             >
-              <Plus className="w-5 h-5" />
-              New WhatsApp Number
+              {isConnectingWhatsApp || isFinalizingWhatsApp ? (
+                <Loader2 className="w-5 h-5 animate-spin" />
+              ) : (
+                <Plus className="w-5 h-5" />
+              )}
+              {isFinalizingWhatsApp ? 'Saving Channel...' : isConnectingWhatsApp ? 'Opening Meta...' : 'Connect WhatsApp'}
             </button>
           </div>
         </div>
@@ -192,6 +311,12 @@ export default function Channels() {
                           <span className="text-[10px] text-gray-400 dark:text-gray-500 italic">None</span>
                         )}
                       </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs text-gray-500 dark:text-gray-400">Connection</span>
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                          {num.connectionSource === 'EMBEDDED_SIGNUP' ? 'Embedded Signup' : 'Manual'}
+                        </span>
+                      </div>
                       {isMetaTestNumber(num.phoneNumber) && (
                         <div className="flex items-center justify-between">
                           <span className="text-xs text-gray-500 dark:text-gray-400">Test Route</span>
@@ -214,19 +339,27 @@ export default function Channels() {
                 ))}
 
                 <button 
-                  disabled={waLimitReached}
-                  onClick={() => waLimitReached ? toast.error(`Limit reached for ${planInfo.name} plan`) : null}
+                  disabled={waLimitReached || isConnectingWhatsApp || isFinalizingWhatsApp}
+                  onClick={handleConnectWhatsApp}
                   className={cn(
                     "border-2 border-dashed rounded-2xl p-6 flex flex-col items-center justify-center text-center transition-all group min-h-[200px]",
-                    waLimitReached ? "bg-gray-50 dark:bg-slate-900/50 border-gray-200 dark:border-slate-800 cursor-not-allowed" : "bg-gray-50 dark:bg-slate-900/50 border-gray-200 dark:border-slate-800 hover:bg-gray-100 dark:hover:bg-slate-800 transition-colors"
+                    waLimitReached || isConnectingWhatsApp || isFinalizingWhatsApp
+                      ? "bg-gray-50 dark:bg-slate-900/50 border-gray-200 dark:border-slate-800 cursor-not-allowed"
+                      : "bg-gray-50 dark:bg-slate-900/50 border-gray-200 dark:border-slate-800 hover:bg-gray-100 dark:hover:bg-slate-800 transition-colors"
                   )}
                 >
                   <div className="w-12 h-12 bg-white dark:bg-slate-800 rounded-full flex items-center justify-center shadow-sm mb-3 group-hover:scale-110 transition-transform">
-                    <Plus className={cn("w-6 h-6", waLimitReached ? "text-gray-300 dark:text-gray-700" : "text-gray-400 dark:text-gray-500")} />
+                    {isConnectingWhatsApp || isFinalizingWhatsApp ? (
+                      <Loader2 className="w-6 h-6 animate-spin text-gray-400 dark:text-gray-500" />
+                    ) : (
+                      <Plus className={cn("w-6 h-6", waLimitReached ? "text-gray-300 dark:text-gray-700" : "text-gray-400 dark:text-gray-500")} />
+                    )}
                   </div>
-                  <p className={cn("text-sm font-semibold", waLimitReached ? "text-gray-400 dark:text-gray-600" : "text-gray-600 dark:text-gray-300")}>Add WhatsApp Number</p>
+                  <p className={cn("text-sm font-semibold", waLimitReached ? "text-gray-400 dark:text-gray-600" : "text-gray-600 dark:text-gray-300")}>
+                    {isFinalizingWhatsApp ? 'Saving Channel...' : isConnectingWhatsApp ? 'Opening Meta...' : 'Connect WhatsApp'}
+                  </p>
                   <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
-                    {waLimitReached ? `Limit reached for ${planInfo.name} plan` : 'Connect your business line'}
+                    {waLimitReached ? `Limit reached for ${planInfo.name} plan` : 'Use Meta Embedded Signup for this workspace'}
                   </p>
                 </button>
               </div>

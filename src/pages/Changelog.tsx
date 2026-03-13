@@ -5,7 +5,7 @@ export default function Changelog() {
     <PublicPageLayout
       eyebrow="Updates"
       title="Recent product improvements"
-      description="This changelog highlights the onboarding, billing, and activation work that has recently improved the first-run WABA Hub experience."
+      description="This changelog highlights the onboarding, billing, and activation work that has recently improved the first-run Tawasel App experience."
       sections={[
         {
           title: 'Activation and onboarding',

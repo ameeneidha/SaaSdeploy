@@ -12,6 +12,8 @@ model User {
   name          String?
   email         String?   @unique
   password      String?
+  passwordResetTokenHash String?
+  passwordResetExpiresAt DateTime?
   image         String?
   emailVerified Boolean   @default(false)
   createdAt     DateTime  @default(now())
@@ -88,6 +90,12 @@ model WhatsAppNumber {
   phoneNumber   String
   status        String    @default("CONNECTED")
   autoReply     Boolean   @default(false)
+  connectionSource String @default("MANUAL") // MANUAL, EMBEDDED_SIGNUP
+  metaPhoneNumberId String? @unique
+  metaWabaId    String?
+  metaBusinessId String?
+  metaAccessToken String?
+  metaTokenExpiresAt DateTime?
   workspaceId   String
   chatbotId     String?
   workspace     Workspace @relation(fields: [workspaceId], references: [id])
@@ -120,10 +128,13 @@ model Contact {
   avatar        String?
   pipelineStage String    @default("NEW_LEAD") // NEW_LEAD, CONTACTED, QUALIFIED, QUOTE_SENT, WON, LOST
   city          String?
+  estimatedValue Float    @default(0)
+  lostReason    String?
   leadSource    String?
   lastCampaignId String?
   tags          String?   // Comma separated tags
   notes         String?
+  lastActivityAt DateTime @default(now())
   workspaceId   String
   assignedToId  String?
   workspace     Workspace @relation(fields: [workspaceId], references: [id])
@@ -177,6 +188,7 @@ model Message {
   senderName    String?
   status        String    @default("SENT") // SENT, DELIVERED, READ, FAILED
   isInternal    Boolean   @default(false)
+  readAt        DateTime?
   createdAt     DateTime  @default(now())
   conversationId String
   conversation  Conversation @relation(fields: [conversationId], references: [id])
@@ -213,6 +225,7 @@ model BroadcastCampaign {
   id            String    @id @default(cuid())
   name          String
   status        String    @default("DRAFT") // DRAFT, SCHEDULED, SENDING, COMPLETED
+  createdAt     DateTime  @default(now())
   scheduledAt   DateTime?
   templateId    String?
   messageBody   String?

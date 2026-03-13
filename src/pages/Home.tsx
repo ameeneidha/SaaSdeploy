@@ -3,7 +3,6 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useApp } from '../contexts/AppContext';
 import axios from 'axios';
 import { motion } from 'motion/react';
-import { toast } from 'sonner';
 import { 
   Check, 
   MessageSquare, 
@@ -36,7 +35,7 @@ const translations = {
       trusted: 'Trusted by 2,000+ teams'
     },
     login: {
-      title: 'Sign in to Hub',
+      title: 'Sign in to Tawasel App',
       desc: 'Access your dashboard and conversations',
       email: 'Email Address',
       password: 'Password',
@@ -198,7 +197,7 @@ export default function Home() {
       
       const res = await axios.post(endpoint, payload);
       setUser(res.data.user, res.data.token);
-      navigate('/app/inbox');
+      navigate('/app/dashboard');
     } catch (err: any) {
       setError(err.response?.data?.error || (isSignUp ? 'Registration failed' : 'Login failed'));
     } finally {
@@ -215,7 +214,7 @@ export default function Home() {
             <div className="w-8 h-8 bg-[#25D366] rounded-lg flex items-center justify-center">
               <MessageSquare className="w-5 h-5 text-white" />
             </div>
-            <span className="text-xl font-bold tracking-tight">WABA Hub</span>
+            <span className="text-xl font-bold tracking-tight">Tawasel App</span>
           </div>
           <div className="hidden md:flex items-center gap-8 text-sm font-medium text-slate-600">
             <a href="#features" className="hover:text-[#25D366] transition-colors">{t.nav.features}</a>
@@ -276,7 +275,7 @@ export default function Home() {
           >
             <div className="mb-8">
               <h2 className="text-2xl font-bold mb-2">{isSignUp ? (isRtl ? 'إنشاء حساب' : 'Create Account') : t.login.title}</h2>
-              <p className="text-slate-500">{isSignUp ? (isRtl ? 'ابدأ رحلتك مع WABA Hub اليوم' : 'Start your journey with WABA Hub today') : t.login.desc}</p>
+              <p className="text-slate-500">{isSignUp ? (isRtl ? 'ابدأ رحلتك مع Tawasel App اليوم' : 'Start your journey with Tawasel App today') : t.login.desc}</p>
             </div>
 
             <div className="flex p-1 bg-slate-200 rounded-xl mb-8">
@@ -333,7 +332,7 @@ export default function Home() {
                   {!isSignUp && (
                     <button
                       type="button"
-                      onClick={() => toast.info(isRtl ? 'سيتم تفعيل استعادة كلمة المرور قريبًا. تواصل مع الدعم مؤقتًا.' : 'Password reset will be available soon. Please contact support for now.')}
+                      onClick={() => navigate('/forgot-password')}
                       className="text-[11px] font-semibold text-[#25D366] hover:text-[#128C7E] transition-colors"
                     >
                       {t.login.forgotPassword}
@@ -453,7 +452,7 @@ export default function Home() {
                 <button 
                   onClick={() => {
                     if (plan.id === 'enterprise') {
-                      window.open('https://quantops.ae', '_blank', 'noopener,noreferrer');
+                      window.open('https://tawasel.io', '_blank', 'noopener,noreferrer');
                       return;
                     }
                     handlePlanSelect(plan.id);
@@ -479,14 +478,14 @@ export default function Home() {
               <div className="w-8 h-8 bg-[#25D366] rounded-lg flex items-center justify-center">
                 <MessageSquare className="w-5 h-5 text-white" />
               </div>
-              <span className="text-xl font-bold">WABA Hub</span>
+              <span className="text-xl font-bold">Tawasel App</span>
             </div>
             <p className="text-slate-400 max-w-sm mb-8">
               {t.footer.desc}
             </p>
             <div className="flex gap-4">
               <a
-                href="https://quantops.ae"
+                href="https://tawasel.io"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="w-10 h-10 rounded-full bg-slate-800 flex items-center justify-center hover:bg-[#25D366] transition-colors"
@@ -518,8 +517,8 @@ export default function Home() {
           </div>
         </div>
         <div className="max-w-7xl mx-auto px-4 mt-20 pt-8 border-t border-slate-800 text-center text-slate-500 text-sm">
-          <p className="mb-2">(c) {new Date().getFullYear()} WABA Hub. All rights reserved.</p>
-          <p>{t.footer.created} <a href="https://quantops.ae" target="_blank" rel="noopener noreferrer" className="text-[#25D366] hover:underline font-medium">Quantops.ae</a></p>
+          <p className="mb-2">(c) {new Date().getFullYear()} Tawasel App. All rights reserved.</p>
+          <p>{t.footer.created} <a href="https://tawasel.io" target="_blank" rel="noopener noreferrer" className="text-[#25D366] hover:underline font-medium">tawasel.io</a></p>
         </div>
       </footer>
     </div>

@@ -8,19 +8,23 @@ import { fileURLToPath } from "url";
 import prisma from "./src/lib/prisma.js";
 import { Server } from "socket.io";
 import { createServer } from "http";
-import { GoogleGenAI } from "@google/genai";
 import OpenAI from "openai";
 import Stripe from "stripe";
 import axios from "axios";
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import multer from 'multer';
+import crypto from 'crypto';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+const FIXED_CHATBOT_MODEL = "gpt-5-nano";
+const GPT_5_NANO_INPUT_COST_PER_1M = 0.05;
+const GPT_5_NANO_CACHED_INPUT_COST_PER_1M = 0.005;
+const GPT_5_NANO_OUTPUT_COST_PER_1M = 0.4;
+
 const stripe = process.env.STRIPE_SECRET_KEY ? new Stripe(process.env.STRIPE_SECRET_KEY) : null;
-const genAI = process.env.GEMINI_API_KEY ? new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY }) : null;
 const openai = process.env.OPENAI_API_KEY ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY }) : null;
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -36,6 +40,56 @@ const WORKSPACE_USER_LIMITS: Record<string, number> = {
   STARTER: 1,
   GROWTH: 3,
   PRO: 5,
+};
+
+const WORKSPACE_PLAN_LIMITS: Record<
+  string,
+  {
+    users: number;
+    whatsapp: number;
+    instagram: number;
+    chatbots: number;
+    contacts: number;
+    broadcasts: number;
+    automations: number;
+  }
+> = {
+  STARTER: {
+    users: 1,
+    whatsapp: 1,
+    instagram: 1,
+    chatbots: 1,
+    contacts: 1000,
+    broadcasts: 500,
+    automations: 3,
+  },
+  GROWTH: {
+    users: 3,
+    whatsapp: 2,
+    instagram: 1,
+    chatbots: 3,
+    contacts: 5000,
+    broadcasts: 3000,
+    automations: 15,
+  },
+  PRO: {
+    users: 5,
+    whatsapp: 5,
+    instagram: 2,
+    chatbots: 10,
+    contacts: 25000,
+    broadcasts: 10000,
+    automations: 999999,
+  },
+};
+
+const DASHBOARD_STAGE_LABELS: Record<string, string> = {
+  NEW_LEAD: 'New Lead',
+  CONTACTED: 'Contacted',
+  QUALIFIED: 'Qualified',
+  QUOTE_SENT: 'Quote Sent',
+  WON: 'Won',
+  LOST: 'Lost',
 };
 
 const getWorkspaceUserLimit = (plan?: string | null) => WORKSPACE_USER_LIMITS[(plan || '').toUpperCase()] || 1;
@@ -61,6 +115,15 @@ const sanitizeDisplayName = (name?: string | null, email?: string | null) => {
   return trimmedName;
 };
 
+const createPasswordResetToken = () => {
+  const token = crypto.randomBytes(32).toString('hex');
+  const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+  return { token, tokenHash };
+};
+
+const hashPasswordResetToken = (token: string) =>
+  crypto.createHash('sha256').update(token).digest('hex');
+
 type WhatsAppMediaKind = 'image' | 'document' | 'audio';
 type IncomingWhatsAppMessagePayload =
   | {
@@ -76,6 +139,204 @@ type IncomingWhatsAppMessagePayload =
       mediaMimeType?: string;
       mediaFilename?: string;
     };
+
+type EmbeddedSignupPhoneAsset = {
+  wabaId: string | null;
+  phoneNumberId: string;
+  displayPhoneNumber: string;
+  verifiedName?: string | null;
+  businessName?: string | null;
+};
+
+type EmbeddedSignupResultPayload = {
+  success: boolean;
+  error?: string;
+  workspaceId?: string | null;
+  businessId?: string | null;
+  accessToken?: string | null;
+  tokenExpiresAt?: string | null;
+  phoneNumbers?: EmbeddedSignupPhoneAsset[];
+};
+
+const META_GRAPH_VERSION = process.env.META_GRAPH_VERSION || 'v22.0';
+
+const getWhatsAppChannelConfig = (number?: {
+  metaAccessToken?: string | null;
+  metaPhoneNumberId?: string | null;
+} | null) => ({
+  accessToken: number?.metaAccessToken?.trim() || process.env.META_ACCESS_TOKEN || "",
+  phoneNumberId: number?.metaPhoneNumberId?.trim() || process.env.META_PHONE_NUMBER_ID || "",
+});
+
+const parseEmbeddedSignupState = (state?: string | null) => {
+  if (!state) return null;
+  try {
+    return JSON.parse(Buffer.from(state, 'base64url').toString('utf8')) as {
+      workspaceId?: string;
+      requestedAt?: string;
+    };
+  } catch {
+    return null;
+  }
+};
+
+const buildEmbeddedSignupState = (workspaceId: string) =>
+  Buffer.from(
+    JSON.stringify({
+      workspaceId,
+      requestedAt: new Date().toISOString(),
+    }),
+    'utf8'
+  ).toString('base64url');
+
+const formatMetaDisplayPhoneNumber = (phoneNumber?: string | null) => {
+  const trimmed = phoneNumber?.trim() || '';
+  if (!trimmed) return '';
+  if (trimmed.startsWith('+')) return trimmed;
+  const digits = normalizePhone(trimmed);
+  return digits ? `+${digits}` : trimmed;
+};
+
+const escapeHtml = (value: string) =>
+  value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+
+async function exchangeMetaCodeForAccessToken(code: string, redirectUri: string) {
+  const appId = process.env.META_APP_ID;
+  const appSecret = process.env.META_APP_SECRET;
+
+  if (!appId || !appSecret) {
+    throw new Error('Meta app credentials are not configured');
+  }
+
+  const response = await axios.get(`https://graph.facebook.com/${META_GRAPH_VERSION}/oauth/access_token`, {
+    params: {
+      client_id: appId,
+      client_secret: appSecret,
+      redirect_uri: redirectUri,
+      code,
+    },
+  });
+
+  return response.data as {
+    access_token: string;
+    expires_in?: number;
+    token_type?: string;
+  };
+}
+
+async function fetchEmbeddedSignupPhoneAssets(accessToken: string) {
+  const collected = new Map<string, EmbeddedSignupPhoneAsset>();
+  const headers = {
+    Authorization: `Bearer ${accessToken}`,
+  };
+
+  const addPhone = (
+    phone: any,
+    fallback: { wabaId?: string | null; businessName?: string | null } = {}
+  ) => {
+    const phoneNumberId = String(phone?.id || '').trim();
+    if (!phoneNumberId) return;
+
+    collected.set(phoneNumberId, {
+      wabaId: String(phone?.whatsapp_business_account_id || fallback.wabaId || '').trim() || fallback.wabaId || null,
+      phoneNumberId,
+      displayPhoneNumber: formatMetaDisplayPhoneNumber(
+        phone?.display_phone_number || phone?.formatted_phone_number || phone?.phone_number
+      ),
+      verifiedName: phone?.verified_name || null,
+      businessName: fallback.businessName || phone?.verified_name || null,
+    });
+  };
+
+  const queryCandidates = [
+    {
+      path: '/me',
+      params: {
+        fields:
+          'id,name,owned_whatsapp_business_accounts{id,name,phone_numbers{id,display_phone_number,verified_name,whatsapp_business_account_id}},client_whatsapp_business_accounts{id,name,phone_numbers{id,display_phone_number,verified_name,whatsapp_business_account_id}}',
+      },
+      collect: (data: any) => {
+        const groups = [
+          ...(Array.isArray(data?.owned_whatsapp_business_accounts?.data)
+            ? data.owned_whatsapp_business_accounts.data
+            : []),
+          ...(Array.isArray(data?.client_whatsapp_business_accounts?.data)
+            ? data.client_whatsapp_business_accounts.data
+            : []),
+        ];
+
+        for (const business of groups) {
+          const phones = Array.isArray(business?.phone_numbers?.data)
+            ? business.phone_numbers.data
+            : Array.isArray(business?.phone_numbers)
+              ? business.phone_numbers
+              : [];
+          for (const phone of phones) {
+            addPhone(phone, { wabaId: business?.id || null, businessName: business?.name || data?.name || null });
+          }
+        }
+      },
+    },
+    {
+      path: '/me/owned_whatsapp_business_accounts',
+      params: {
+        fields: 'id,name,phone_numbers{id,display_phone_number,verified_name,whatsapp_business_account_id}',
+      },
+      collect: (data: any) => {
+        for (const business of Array.isArray(data?.data) ? data.data : []) {
+          const phones = Array.isArray(business?.phone_numbers?.data)
+            ? business.phone_numbers.data
+            : Array.isArray(business?.phone_numbers)
+              ? business.phone_numbers
+              : [];
+          for (const phone of phones) {
+            addPhone(phone, { wabaId: business?.id || null, businessName: business?.name || null });
+          }
+        }
+      },
+    },
+    {
+      path: '/me/client_whatsapp_business_accounts',
+      params: {
+        fields: 'id,name,phone_numbers{id,display_phone_number,verified_name,whatsapp_business_account_id}',
+      },
+      collect: (data: any) => {
+        for (const business of Array.isArray(data?.data) ? data.data : []) {
+          const phones = Array.isArray(business?.phone_numbers?.data)
+            ? business.phone_numbers.data
+            : Array.isArray(business?.phone_numbers)
+              ? business.phone_numbers
+              : [];
+          for (const phone of phones) {
+            addPhone(phone, { wabaId: business?.id || null, businessName: business?.name || null });
+          }
+        }
+      },
+    },
+  ];
+
+  for (const query of queryCandidates) {
+    try {
+      const response = await axios.get(`https://graph.facebook.com/${META_GRAPH_VERSION}${query.path}`, {
+        params: query.params,
+        headers,
+      });
+      query.collect(response.data);
+      if (collected.size > 0) {
+        break;
+      }
+    } catch (error) {
+      console.warn(`Embedded signup asset lookup failed for ${query.path}`);
+    }
+  }
+
+  return Array.from(collected.values()).filter((asset) => asset.displayPhoneNumber || asset.phoneNumberId);
+}
 
 const getWhatsAppMediaKind = (file: Express.Multer.File): WhatsAppMediaKind | null => {
   if (file.mimetype.startsWith('image/')) return 'image';
@@ -147,22 +408,14 @@ async function getAIResponse(chatbot: any, message: string) {
   try {
     if (openai) {
       const completion = await openai.chat.completions.create({
-        model: chatbot.model || "gpt-4o-mini",
+        model: FIXED_CHATBOT_MODEL,
         messages: [
           { role: "system", content: chatbot.instructions },
           { role: "user", content: message }
         ],
       });
+      await recordAiUsage(chatbot.workspaceId, `AI chatbot reply - ${chatbot.name}`, completion.usage);
       return completion.choices[0].message.content || "";
-    } else if (genAI) {
-      const result = await genAI.models.generateContent({
-        model: chatbot.model || "gemini-1.5-flash",
-        contents: [
-          { parts: [{ text: `System Instructions: ${chatbot.instructions}` }] },
-          { parts: [{ text: `User Message: ${message}` }] }
-        ]
-      });
-      return result.text || "";
     }
   } catch (error) {
     console.error("AI Response Error:", error);
@@ -170,7 +423,10 @@ async function getAIResponse(chatbot: any, message: string) {
   return "";
 }
 
-async function generateAISummary(conversationHistory: { content: string; senderType: string }[]) {
+async function generateAISummary(
+  conversationHistory: { content: string; senderType: string }[],
+  workspaceId?: string | null
+) {
   const historyString = conversationHistory
     .map((msg) => `${msg.senderType}: ${msg.content}`)
     .join("\n");
@@ -187,18 +443,11 @@ async function generateAISummary(conversationHistory: { content: string; senderT
   try {
     if (openai) {
       const completion = await openai.chat.completions.create({
-        model: "gpt-4o-mini",
+        model: FIXED_CHATBOT_MODEL,
         messages: [{ role: "user", content: prompt }],
       });
+      await recordAiUsage(workspaceId, "AI conversation summary", completion.usage);
       return completion.choices[0].message.content || "";
-    }
-
-    if (genAI) {
-      const result = await genAI.models.generateContent({
-        model: "gemini-1.5-flash",
-        contents: [{ parts: [{ text: prompt }] }],
-      });
-      return result.text || "";
     }
   } catch (error) {
     console.error("AI Summary Error:", error);
@@ -207,7 +456,10 @@ async function generateAISummary(conversationHistory: { content: string; senderT
   return "";
 }
 
-async function generateAIReplySuggestions(conversationHistory: { content: string; senderType: string }[]) {
+async function generateAIReplySuggestions(
+  conversationHistory: { content: string; senderType: string }[],
+  workspaceId?: string | null
+) {
   const historyString = conversationHistory
     .map((msg) => `${msg.senderType}: ${msg.content}`)
     .join("\n");
@@ -227,25 +479,13 @@ async function generateAIReplySuggestions(conversationHistory: { content: string
   try {
     if (openai) {
       const completion = await openai.chat.completions.create({
-        model: "gpt-4o-mini",
+        model: FIXED_CHATBOT_MODEL,
         messages: [{ role: "user", content: prompt }],
       });
+      await recordAiUsage(workspaceId, "AI reply suggestions", completion.usage);
 
       const content = completion.choices[0].message.content || "";
       const parsed = parseSuggestionPayload(content);
-      if (parsed.length) return parsed;
-    }
-
-    if (genAI) {
-      const result = await genAI.models.generateContent({
-        model: "gemini-1.5-flash",
-        contents: [{ parts: [{ text: prompt }] }],
-        config: {
-          responseMimeType: "application/json",
-        },
-      });
-      const text = result.text || "";
-      const parsed = parseSuggestionPayload(text);
       if (parsed.length) return parsed;
     }
   } catch (error) {
@@ -273,6 +513,711 @@ function parseSuggestionPayload(payload: string) {
   }
 
   return [];
+}
+
+const roundBillingAmount = (value: number) => Number(value.toFixed(6));
+
+const getOpenAIUsageBreakdown = (usage: any) => {
+  const promptTokens = Number(usage?.prompt_tokens || 0);
+  const completionTokens = Number(usage?.completion_tokens || 0);
+  const cachedPromptTokens = Number(
+    usage?.prompt_tokens_details?.cached_tokens ||
+      usage?.input_tokens_details?.cached_tokens ||
+      0
+  );
+  const billablePromptTokens = Math.max(promptTokens - cachedPromptTokens, 0);
+  const totalTokens = Number(usage?.total_tokens || promptTokens + completionTokens);
+
+  return {
+    promptTokens,
+    cachedPromptTokens,
+    billablePromptTokens,
+    completionTokens,
+    totalTokens,
+  };
+};
+
+const calculateGpt5NanoCostUsd = (usage: any) => {
+  const breakdown = getOpenAIUsageBreakdown(usage);
+
+  const inputCost = (breakdown.billablePromptTokens / 1_000_000) * GPT_5_NANO_INPUT_COST_PER_1M;
+  const cachedInputCost = (breakdown.cachedPromptTokens / 1_000_000) * GPT_5_NANO_CACHED_INPUT_COST_PER_1M;
+  const outputCost = (breakdown.completionTokens / 1_000_000) * GPT_5_NANO_OUTPUT_COST_PER_1M;
+
+  return {
+    ...breakdown,
+    inputCost,
+    cachedInputCost,
+    outputCost,
+    totalCost: inputCost + cachedInputCost + outputCost,
+  };
+};
+
+async function recordAiUsage(
+  workspaceId: string | null | undefined,
+  description: string,
+  usage: any,
+  model = FIXED_CHATBOT_MODEL
+) {
+  if (!workspaceId) return null;
+
+  const costBreakdown = calculateGpt5NanoCostUsd(usage);
+  if (costBreakdown.totalTokens <= 0) return null;
+
+  const roundedCost = roundBillingAmount(costBreakdown.totalCost);
+  const ledgerDescription = `${description} (${model}) - ${costBreakdown.totalTokens} tokens`;
+
+  await prisma.$transaction([
+    prisma.usageLog.create({
+      data: {
+        workspaceId,
+        type: "AI_TOKEN",
+        quantity: costBreakdown.totalTokens,
+        cost: roundedCost,
+      },
+    }),
+    prisma.billingLedgerEntry.create({
+      data: {
+        workspaceId,
+        amount: roundedCost,
+        type: "DEBIT",
+        description: ledgerDescription,
+      },
+    }),
+  ]);
+
+  return {
+    ...costBreakdown,
+    totalCost: roundedCost,
+    description: ledgerDescription,
+  };
+}
+
+async function getWorkspaceBillingSummary(workspaceId: string) {
+  const [ledger, usageLogs] = await Promise.all([
+    prisma.billingLedgerEntry.findMany({
+      where: { workspaceId },
+      orderBy: { createdAt: "desc" },
+    }),
+    prisma.usageLog.findMany({
+      where: {
+        workspaceId,
+        type: "AI_TOKEN",
+      },
+      orderBy: { createdAt: "desc" },
+    }),
+  ]);
+
+  const totalCredits = ledger
+    .filter((entry) => entry.type === "CREDIT")
+    .reduce((sum, entry) => sum + entry.amount, 0);
+  const totalDebits = ledger
+    .filter((entry) => entry.type === "DEBIT")
+    .reduce((sum, entry) => sum + entry.amount, 0);
+  const balance = totalCredits - totalDebits;
+  const aiTokensUsed = usageLogs.reduce((sum, entry) => sum + entry.quantity, 0);
+  const aiSpend = usageLogs.reduce((sum, entry) => sum + entry.cost, 0);
+
+  return {
+    balance: roundBillingAmount(balance),
+    totalCredits: roundBillingAmount(totalCredits),
+    totalDebits: roundBillingAmount(totalDebits),
+    aiTokensUsed,
+    aiSpend: roundBillingAmount(aiSpend),
+    usageEvents: usageLogs.length,
+    ledger,
+    usageLogs,
+  };
+}
+
+const getPlanLimitSnapshot = (plan?: string | null) =>
+  WORKSPACE_PLAN_LIMITS[(plan || '').toUpperCase()] || {
+    users: 1,
+    whatsapp: 1,
+    instagram: 1,
+    chatbots: 1,
+    contacts: 1000,
+    broadcasts: 500,
+    automations: 3,
+  };
+
+const startOfDay = (value: Date) => {
+  const date = new Date(value);
+  date.setHours(0, 0, 0, 0);
+  return date;
+};
+
+const endOfDay = (value: Date) => {
+  const date = new Date(value);
+  date.setHours(23, 59, 59, 999);
+  return date;
+};
+
+const addDays = (value: Date, days: number) => {
+  const date = new Date(value);
+  date.setDate(date.getDate() + days);
+  return date;
+};
+
+const isWithinRange = (value: Date | string | null | undefined, start: Date, end: Date) => {
+  if (!value) return false;
+  const date = value instanceof Date ? value : new Date(value);
+  return date >= start && date <= end;
+};
+
+const toPercent = (value: number, total: number) => {
+  if (!total) return 0;
+  return Math.round((value / total) * 1000) / 10;
+};
+
+const toCurrency = (value: number) => Math.round((value || 0) * 100) / 100;
+
+const average = (values: number[]) => {
+  if (values.length === 0) return 0;
+  return Math.round((values.reduce((sum, value) => sum + value, 0) / values.length) * 10) / 10;
+};
+
+const differenceInMinutesSafe = (later?: Date | string | null, earlier?: Date | string | null) => {
+  if (!later || !earlier) return null;
+  const laterDate = later instanceof Date ? later : new Date(later);
+  const earlierDate = earlier instanceof Date ? earlier : new Date(earlier);
+  const diffMs = laterDate.getTime() - earlierDate.getTime();
+  if (!Number.isFinite(diffMs) || diffMs < 0) return null;
+  return diffMs / (1000 * 60);
+};
+
+const parseDashboardDateRange = (query: any) => {
+  const now = new Date();
+  const range = String(query.range || '7d').trim().toLowerCase();
+  let start = startOfDay(addDays(now, -6));
+  let end = endOfDay(now);
+
+  if (range === 'today') {
+    start = startOfDay(now);
+    end = endOfDay(now);
+  } else if (range === '30d') {
+    start = startOfDay(addDays(now, -29));
+    end = endOfDay(now);
+  } else if (range === 'custom') {
+    const from = query.from ? new Date(String(query.from)) : null;
+    const to = query.to ? new Date(String(query.to)) : null;
+
+    if (from && !Number.isNaN(from.getTime())) {
+      start = startOfDay(from);
+    }
+
+    if (to && !Number.isNaN(to.getTime())) {
+      end = endOfDay(to);
+    }
+  }
+
+  return {
+    range,
+    start,
+    end,
+  };
+};
+
+function buildConversationWhere(workspaceId: string, query: any) {
+  return {
+    workspaceId,
+    ...(query.agentId ? { assignedToId: String(query.agentId) } : {}),
+    ...(query.channelType ? { channelType: String(query.channelType).toUpperCase() } : {}),
+    ...(query.priority ? { priority: String(query.priority).toUpperCase() } : {}),
+    ...(query.leadSource
+      ? {
+          contact: {
+            leadSource: String(query.leadSource),
+          },
+        }
+      : {}),
+  };
+}
+
+function buildContactWhere(workspaceId: string, query: any) {
+  return {
+    workspaceId,
+    ...(query.agentId ? { assignedToId: String(query.agentId) } : {}),
+    ...(query.leadSource ? { leadSource: String(query.leadSource) } : {}),
+  };
+}
+
+async function getDashboardSections(workspaceId: string, query: any) {
+  const { range, start, end } = parseDashboardDateRange(query);
+  const now = new Date();
+  const staleThreshold = addDays(now, -7);
+  const conversationWhere = buildConversationWhere(workspaceId, query);
+  const contactWhere = buildContactWhere(workspaceId, query);
+  const messageConversationWhere = {
+    ...conversationWhere,
+  };
+
+  const [workspace, contacts, conversations, unreadMessagesCount, failedMessagesCount, stageActivities, campaigns, billingSummary] =
+    await Promise.all([
+      prisma.workspace.findUnique({
+        where: { id: workspaceId },
+        include: {
+          members: {
+            include: {
+              user: true,
+            },
+          },
+          numbers: true,
+          instagramAccounts: true,
+          chatbots: true,
+          automationRules: {
+            where: { enabled: true },
+          },
+        },
+      }),
+      prisma.contact.findMany({
+        where: contactWhere,
+        select: {
+          id: true,
+          name: true,
+          phoneNumber: true,
+          pipelineStage: true,
+          leadSource: true,
+          createdAt: true,
+          lastActivityAt: true,
+          estimatedValue: true,
+          lostReason: true,
+          assignedToId: true,
+        },
+      }),
+      prisma.conversation.findMany({
+        where: conversationWhere,
+        select: {
+          id: true,
+          status: true,
+          internalStatus: true,
+          channelType: true,
+          aiPaused: true,
+          lastMessageAt: true,
+          firstResponseAt: true,
+          resolvedAt: true,
+          priority: true,
+          assignedToId: true,
+          slaDeadline: true,
+          slaStatus: true,
+          contactId: true,
+          contact: {
+            select: {
+              leadSource: true,
+            },
+          },
+          assignedTo: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+            },
+          },
+          messages: {
+            orderBy: { createdAt: 'asc' },
+            select: {
+              id: true,
+              createdAt: true,
+              direction: true,
+              senderType: true,
+              isInternal: true,
+              readAt: true,
+              status: true,
+            },
+          },
+        },
+      }),
+      prisma.message.count({
+        where: {
+          direction: 'INCOMING',
+          isInternal: false,
+          readAt: null,
+          conversation: messageConversationWhere,
+        },
+      }),
+      prisma.message.count({
+        where: {
+          direction: 'OUTGOING',
+          status: 'FAILED',
+          createdAt: { gte: start, lte: end },
+          conversation: messageConversationWhere,
+        },
+      }),
+      prisma.activityLog.findMany({
+        where: {
+          workspaceId,
+          type: 'STAGE_CHANGE',
+          createdAt: { gte: start, lte: end },
+        },
+        select: {
+          id: true,
+          content: true,
+          createdAt: true,
+        },
+      }),
+      prisma.broadcastCampaign.findMany({
+        where: {
+          workspaceId,
+          createdAt: { gte: start, lte: end },
+        },
+        include: {
+          number: true,
+          _count: {
+            select: {
+              recipients: true,
+            },
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 8,
+      }),
+      getWorkspaceBillingSummary(workspaceId),
+    ]);
+
+  if (!workspace) {
+    throw new Error('Workspace not found');
+  }
+
+  const contactsCreatedInRange = contacts.filter((contact) => isWithinRange(contact.createdAt, start, end));
+  const activePipelineContacts = contacts.filter(
+    (contact) => !['WON', 'LOST'].includes((contact.pipelineStage || '').toUpperCase())
+  );
+  const staleContacts = activePipelineContacts.filter(
+    (contact) => !contact.lastActivityAt || new Date(contact.lastActivityAt) < staleThreshold
+  );
+
+  const openConversations = conversations.filter(
+    (conversation) => conversation.status === 'ACTIVE' && conversation.internalStatus !== 'RESOLVED'
+  );
+  const overdueConversations = openConversations.filter(
+    (conversation) =>
+      conversation.slaStatus === 'BREACHED' ||
+      (conversation.slaDeadline ? new Date(conversation.slaDeadline) < now : false)
+  );
+  const conversationsInRange = conversations.filter((conversation) =>
+    conversation.messages.some((message) => isWithinRange(message.createdAt, start, end))
+  );
+
+  const firstReplyDurations = conversationsInRange
+    .map((conversation) => {
+      const firstCustomerMessage = conversation.messages.find(
+        (message) => message.direction === 'INCOMING' && !message.isInternal
+      );
+      return differenceInMinutesSafe(conversation.firstResponseAt, firstCustomerMessage?.createdAt);
+    })
+    .filter((value): value is number => typeof value === 'number');
+
+  const dealsWon = stageActivities.filter((activity) => activity.content.includes(' to WON')).length;
+  const lostDealsInRange = stageActivities.filter((activity) => activity.content.includes(' to LOST')).length;
+  const pipelineValue = activePipelineContacts.reduce(
+    (sum, contact) => sum + Number(contact.estimatedValue || 0),
+    0
+  );
+
+  const botHandledConversations = conversationsInRange.filter((conversation) => {
+    const hasAiReply = conversation.messages.some(
+      (message) => message.direction === 'OUTGOING' && message.senderType === 'AI_BOT'
+    );
+    const hasHumanReply = conversation.messages.some(
+      (message) => message.direction === 'OUTGOING' && message.senderType === 'USER' && !message.isInternal
+    );
+    return hasAiReply && !hasHumanReply;
+  });
+
+  const aiTouchedConversations = conversationsInRange.filter((conversation) =>
+    conversation.messages.some(
+      (message) => message.direction === 'OUTGOING' && message.senderType === 'AI_BOT'
+    )
+  );
+
+  const pipelineStages = Object.entries(DASHBOARD_STAGE_LABELS).map(([stageId, label]) => {
+    const stageContacts = contacts.filter((contact) => (contact.pipelineStage || '').toUpperCase() === stageId);
+    return {
+      id: stageId,
+      label,
+      count: stageContacts.length,
+      value: toCurrency(
+        stageContacts.reduce((sum, contact) => sum + Number(contact.estimatedValue || 0), 0)
+      ),
+    };
+  });
+
+  const sourceMap = new Map<string, number>();
+  for (const contact of contactsCreatedInRange) {
+    const key = contact.leadSource?.trim() || 'Unknown';
+    sourceMap.set(key, (sourceMap.get(key) || 0) + 1);
+  }
+
+  const lostReasonMap = new Map<string, number>();
+  for (const contact of contacts.filter((item) => item.pipelineStage === 'LOST')) {
+    const key = contact.lostReason?.trim() || 'Unknown';
+    lostReasonMap.set(key, (lostReasonMap.get(key) || 0) + 1);
+  }
+
+  const teamMembers = workspace.members.map((membership) => {
+    const assignedConversations = conversations.filter(
+      (conversation) => conversation.assignedToId === membership.userId
+    );
+    const assignedOpenConversations = assignedConversations.filter(
+      (conversation) => conversation.status === 'ACTIVE' && conversation.internalStatus !== 'RESOLVED'
+    );
+    const assignedOverdueConversations = overdueConversations.filter(
+      (conversation) => conversation.assignedToId === membership.userId
+    );
+    const resolvedConversations = assignedConversations.filter((conversation) =>
+      isWithinRange(conversation.resolvedAt, start, end)
+    );
+    const unreadAssigned = assignedOpenConversations.reduce(
+      (sum, conversation) =>
+        sum +
+        conversation.messages.filter(
+          (message) => message.direction === 'INCOMING' && !message.isInternal && !message.readAt
+        ).length,
+      0
+    );
+    const memberFirstReplyDurations = assignedConversations
+      .map((conversation) => {
+        const firstCustomerMessage = conversation.messages.find(
+          (message) => message.direction === 'INCOMING' && !message.isInternal
+        );
+        return differenceInMinutesSafe(conversation.firstResponseAt, firstCustomerMessage?.createdAt);
+      })
+      .filter((value): value is number => typeof value === 'number');
+
+    return {
+      id: membership.userId,
+      name: sanitizeDisplayName(membership.user?.name, membership.user?.email),
+      email: membership.user?.email || '',
+      role: membership.role,
+      openChats: assignedOpenConversations.length,
+      overdueChats: assignedOverdueConversations.length,
+      resolvedConversations: resolvedConversations.length,
+      unreadAssigned,
+      avgFirstReplyMinutes: average(memberFirstReplyDurations),
+    };
+  });
+
+  const planLimits = getPlanLimitSnapshot(workspace.plan);
+  const usageItems = [
+    {
+      key: 'whatsapp',
+      label: 'WhatsApp numbers',
+      used: workspace.numbers.length,
+      limit: planLimits.whatsapp,
+    },
+    {
+      key: 'instagram',
+      label: 'Instagram accounts',
+      used: workspace.instagramAccounts.length,
+      limit: planLimits.instagram,
+    },
+    {
+      key: 'chatbots',
+      label: 'AI chatbots',
+      used: workspace.chatbots.length,
+      limit: planLimits.chatbots,
+    },
+    {
+      key: 'users',
+      label: 'Team members',
+      used: workspace.members.length,
+      limit: planLimits.users,
+    },
+    {
+      key: 'contacts',
+      label: 'Contacts',
+      used: contacts.length,
+      limit: planLimits.contacts,
+    },
+    {
+      key: 'broadcasts',
+      label: 'Broadcasts this period',
+      used: campaigns.length,
+      limit: planLimits.broadcasts,
+    },
+  ].map((item) => ({
+    ...item,
+    percent: item.limit > 0 ? Math.min(100, Math.round((item.used / item.limit) * 100)) : 0,
+  }));
+
+  const recentCampaigns = campaigns.map((campaign) => ({
+    id: campaign.id,
+    name: campaign.name,
+    status: campaign.status,
+    senderName: campaign.number?.name || 'WhatsApp sender',
+    senderPhoneNumber: campaign.number?.phoneNumber || '',
+    createdAt: campaign.createdAt,
+    deliveredCount: campaign.deliveredCount,
+    readCount: campaign.readCount,
+    repliedCount: campaign.repliedCount,
+    recipientCount: campaign._count?.recipients || 0,
+    deliveryRate: toPercent(campaign.deliveredCount, campaign._count?.recipients || 0),
+    readRate: toPercent(campaign.readCount, campaign.deliveredCount || 0),
+    replyRate: toPercent(campaign.repliedCount, campaign._count?.recipients || 0),
+  }));
+
+  const alerts = [
+    overdueConversations.length > 0
+      ? {
+          id: 'overdue-conversations',
+          severity: 'critical',
+          title: `${overdueConversations.length} overdue conversations`,
+          description: 'Customers are waiting past the SLA threshold right now.',
+          href: '/app/inbox',
+        }
+      : null,
+    unreadMessagesCount > 0
+      ? {
+          id: 'unread-messages',
+          severity: unreadMessagesCount > 10 ? 'warning' : 'info',
+          title: `${unreadMessagesCount} unread customer message${unreadMessagesCount === 1 ? '' : 's'}`,
+          description: 'Review the inbox and assign follow-up quickly.',
+          href: '/app/inbox',
+        }
+      : null,
+    staleContacts.length > 0
+      ? {
+          id: 'stale-leads',
+          severity: 'warning',
+          title: `${staleContacts.length} stale lead${staleContacts.length === 1 ? '' : 's'}`,
+          description: 'These leads have gone quiet for more than 7 days.',
+          href: '/app/crm',
+        }
+      : null,
+    failedMessagesCount > 0
+      ? {
+          id: 'failed-messages',
+          severity: 'warning',
+          title: `${failedMessagesCount} failed outbound message${failedMessagesCount === 1 ? '' : 's'}`,
+          description: 'A recent send did not reach the channel successfully.',
+          href: '/app/inbox',
+        }
+      : null,
+    workspace.numbers.filter((number) => number.status !== 'CONNECTED').length +
+      workspace.instagramAccounts.filter((account) => account.status !== 'CONNECTED').length >
+    0
+      ? {
+          id: 'disconnected-channels',
+          severity: 'warning',
+          title: 'One or more channels need reconnection',
+          description: 'Disconnected channels stop inbound messages and broadcasts.',
+          href: '/app/channels',
+        }
+      : null,
+    usageItems.find((item) => item.percent >= 80)
+      ? {
+          id: 'plan-limits',
+          severity: 'info',
+          title: 'Workspace is nearing a plan limit',
+          description: 'Usage is above 80% on at least one tracked resource.',
+          href: '/app/settings/billing/plans',
+        }
+      : null,
+  ].filter(Boolean);
+
+  const connectedWhatsApp = workspace.numbers.filter((number) => number.status === 'CONNECTED').length;
+  const connectedInstagram = workspace.instagramAccounts.filter((account) => account.status === 'CONNECTED').length;
+
+  return {
+    meta: {
+      range,
+      start,
+      end,
+      generatedAt: now,
+      availableFilters: {
+        agents: workspace.members.map((membership) => ({
+          id: membership.userId,
+          name: sanitizeDisplayName(membership.user?.name, membership.user?.email),
+        })),
+        leadSources: Array.from(
+          new Set(contacts.map((contact) => contact.leadSource?.trim()).filter(Boolean))
+        ).sort(),
+      },
+    },
+    overview: {
+      newLeads: contactsCreatedInRange.length,
+      openChats: openConversations.length,
+      overdueChats: overdueConversations.length,
+      avgFirstReplyMinutes: average(firstReplyDurations),
+      dealsWon,
+      pipelineValue: toCurrency(pipelineValue),
+      unreadMessages: unreadMessagesCount,
+      botHandledRate: toPercent(botHandledConversations.length, conversationsInRange.length),
+    },
+    pipeline: {
+      stages: pipelineStages,
+      winRate: toPercent(dealsWon, contactsCreatedInRange.length),
+      staleLeadCount: staleContacts.length,
+      lostDeals: lostDealsInRange,
+      sourceBreakdown: Array.from(sourceMap.entries())
+        .map(([source, count]) => ({ source, count }))
+        .sort((a, b) => b.count - a.count),
+      lostReasons: Array.from(lostReasonMap.entries())
+        .map(([reason, count]) => ({ reason, count }))
+        .sort((a, b) => b.count - a.count),
+    },
+    inbox: {
+      unreadMessages: unreadMessagesCount,
+      openChats: openConversations.length,
+      overdueChats: overdueConversations.length,
+      slaComplianceRate: toPercent(
+        openConversations.length - overdueConversations.length,
+        openConversations.length
+      ),
+      waitingForCustomer: openConversations.filter((conversation) => conversation.internalStatus === 'WAITING_FOR_CUSTOMER').length,
+      waitingForInternal: openConversations.filter((conversation) => conversation.internalStatus === 'WAITING_FOR_INTERNAL').length,
+      avgFirstReplyMinutes: average(firstReplyDurations),
+    },
+    team: {
+      workload: teamMembers.sort((a, b) => b.openChats - a.openChats),
+    },
+    campaigns: {
+      totals: {
+        campaigns: campaigns.length,
+        delivered: campaigns.reduce((sum, campaign) => sum + campaign.deliveredCount, 0),
+        read: campaigns.reduce((sum, campaign) => sum + campaign.readCount, 0),
+        replied: campaigns.reduce((sum, campaign) => sum + campaign.repliedCount, 0),
+      },
+      recent: recentCampaigns,
+    },
+    chatbot: {
+      enabledBots: workspace.chatbots.filter((chatbot) => chatbot.enabled).length,
+      assignedChannels:
+        workspace.numbers.filter((number) => number.chatbotId).length +
+        workspace.instagramAccounts.filter((account) => account.chatbotId).length,
+      aiMessagesSent: conversationsInRange.reduce(
+        (sum, conversation) =>
+          sum +
+          conversation.messages.filter(
+            (message) =>
+              message.direction === 'OUTGOING' && message.senderType === 'AI_BOT'
+          ).length,
+        0
+      ),
+      botHandledRate: toPercent(botHandledConversations.length, conversationsInRange.length),
+      handoffRate: toPercent(
+        aiTouchedConversations.filter((conversation) =>
+          conversation.messages.some(
+            (message) =>
+              message.direction === 'OUTGOING' &&
+              message.senderType === 'USER' &&
+              !message.isInternal
+          )
+        ).length,
+        aiTouchedConversations.length
+      ),
+    },
+    channels: {
+      whatsappConnected: connectedWhatsApp,
+      whatsappDisconnected: workspace.numbers.length - connectedWhatsApp,
+      instagramConnected: connectedInstagram,
+      instagramDisconnected: workspace.instagramAccounts.length - connectedInstagram,
+      usage: usageItems,
+      aiSpend: billingSummary.aiSpend,
+      creditBalance: billingSummary.balance,
+    },
+    alerts,
+  };
 }
 
 async function sendMetaMessage(to: string, text: string, type: 'whatsapp' | 'instagram', config: { accessToken: string, phoneNumberId?: string, instagramId?: string }) {
@@ -663,6 +1608,22 @@ async function startServer() {
 
   const hasSubscription = (status?: string | null) => ['active', 'trialing'].includes((status || '').toLowerCase());
 
+  const requireWorkspaceAccessById = async (req: any, res: any, next: any, workspaceId?: string | null) => {
+    if (!workspaceId) {
+      return res.status(400).json({ error: 'Workspace is required' });
+    }
+
+    const membership = await prisma.workspaceMembership.findFirst({
+      where: { workspaceId, userId: req.user.userId }
+    });
+
+    if (!membership) {
+      return res.status(403).json({ error: 'Workspace access denied' });
+    }
+
+    next();
+  };
+
   const requireVerifiedEmail = async (req: any, res: any, next: any) => {
     const user = await getUserByToken(req);
     if (!user?.emailVerified) {
@@ -751,6 +1712,51 @@ async function startServer() {
     return Array.from(resolvedIds);
   };
 
+  const getAppBaseUrl = (req: express.Request) =>
+    (process.env.APP_URL || `${req.protocol}://${req.get('host') || `localhost:${PORT}`}`).replace(/\/$/, '');
+
+  const getEmbeddedSignupCallbackUrl = (req: express.Request) =>
+    `${getAppBaseUrl(req)}/api/meta/embedded-signup/callback`;
+
+  const sendEmbeddedSignupCallbackPage = (res: express.Response, payload: EmbeddedSignupResultPayload) => {
+    const message = JSON.stringify({
+      type: 'meta-embedded-signup',
+      payload,
+    }).replace(/</g, '\\u003c');
+
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.status(200).send(`<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>WhatsApp connection</title>
+    <style>
+      body { font-family: Arial, sans-serif; background: #f6f8fb; color: #102030; display: grid; place-items: center; min-height: 100vh; margin: 0; }
+      .card { background: white; border-radius: 16px; padding: 24px; box-shadow: 0 10px 30px rgba(16,32,48,.08); max-width: 420px; width: calc(100% - 32px); }
+      h1 { font-size: 20px; margin: 0 0 8px; }
+      p { margin: 0; color: #667085; line-height: 1.5; }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h1>Returning to WABA Hub</h1>
+      <p>You can close this window if it does not close automatically.</p>
+    </div>
+    <script>
+      (function () {
+        var message = ${message};
+        try {
+          if (window.opener && !window.opener.closed) {
+            window.opener.postMessage(message, window.location.origin);
+          }
+        } catch (error) {}
+        window.setTimeout(function () { window.close(); }, 200);
+      })();
+    </script>
+  </body>
+</html>`);
+  };
+
   // Socket.io connection handling
   io.on("connection", (socket) => {
     console.log("A user connected:", socket.id);
@@ -768,6 +1774,184 @@ async function startServer() {
   // API Routes
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok" });
+  });
+
+  app.get("/api/meta/embedded-signup/config", requireAuth, async (req, res) => {
+    res.json({
+      enabled: Boolean(process.env.META_APP_ID && process.env.META_APP_SECRET && process.env.META_EMBEDDED_SIGNUP_CONFIG_ID),
+      graphVersion: META_GRAPH_VERSION,
+      appId: process.env.META_APP_ID || null,
+      configId: process.env.META_EMBEDDED_SIGNUP_CONFIG_ID || null,
+      callbackUrl: getEmbeddedSignupCallbackUrl(req),
+    });
+  });
+
+  app.get("/api/meta/embedded-signup/start", requireAuth, async (req: any, res) => {
+    const workspaceId = String(req.query.workspaceId || '').trim();
+    if (!workspaceId) {
+      return res.status(400).json({ error: "Workspace is required" });
+    }
+
+    return requireSubscribedWorkspaceById(req, res, async () => {
+      const appId = process.env.META_APP_ID;
+      const configId = process.env.META_EMBEDDED_SIGNUP_CONFIG_ID;
+
+      if (!appId || !process.env.META_APP_SECRET || !configId) {
+        return res.status(400).json({ error: "Embedded Signup is not configured yet" });
+      }
+
+      const redirectUri = getEmbeddedSignupCallbackUrl(req);
+      const params = new URLSearchParams({
+        client_id: appId,
+        redirect_uri: redirectUri,
+        state: buildEmbeddedSignupState(workspaceId),
+        response_type: 'code',
+        config_id: configId,
+        scope: 'business_management,whatsapp_business_management,whatsapp_business_messaging',
+      });
+
+      res.json({
+        url: `https://www.facebook.com/${META_GRAPH_VERSION}/dialog/oauth?${params.toString()}`,
+        callbackUrl: redirectUri,
+      });
+    }, workspaceId);
+  });
+
+  app.get("/api/meta/embedded-signup/callback", async (req, res) => {
+    const error = String(req.query.error_message || req.query.error_description || req.query.error || '').trim();
+    const state = parseEmbeddedSignupState(String(req.query.state || ''));
+    const phoneNumberId = String(req.query.phone_number_id || '').trim();
+    const wabaId = String(req.query.waba_id || '').trim();
+    const displayPhoneNumber = String(req.query.display_phone_number || '').trim();
+    const businessId = String(req.query.business_id || '').trim();
+    const businessName = String(req.query.business_name || '').trim();
+
+    if (error) {
+      return sendEmbeddedSignupCallbackPage(res, {
+        success: false,
+        error,
+        workspaceId: state?.workspaceId || null,
+      });
+    }
+
+    const code = String(req.query.code || '').trim();
+    if (!code) {
+      return sendEmbeddedSignupCallbackPage(res, {
+        success: false,
+        error: "Meta did not return an authorization code",
+        workspaceId: state?.workspaceId || null,
+      });
+    }
+
+    try {
+      const redirectUri = getEmbeddedSignupCallbackUrl(req);
+      const tokenResponse = await exchangeMetaCodeForAccessToken(code, redirectUri);
+      let phoneNumbers = await fetchEmbeddedSignupPhoneAssets(tokenResponse.access_token);
+
+      if (phoneNumbers.length === 0 && phoneNumberId) {
+        phoneNumbers = [
+          {
+            wabaId: wabaId || null,
+            phoneNumberId,
+            displayPhoneNumber: formatMetaDisplayPhoneNumber(displayPhoneNumber || phoneNumberId),
+            businessName: businessName || null,
+          },
+        ];
+      }
+
+      if (phoneNumbers.length === 0) {
+        return sendEmbeddedSignupCallbackPage(res, {
+          success: false,
+          error: "Meta connected successfully, but no WhatsApp phone number details were returned",
+          workspaceId: state?.workspaceId || null,
+        });
+      }
+
+      return sendEmbeddedSignupCallbackPage(res, {
+        success: true,
+        workspaceId: state?.workspaceId || null,
+        businessId: businessId || null,
+        accessToken: tokenResponse.access_token,
+        tokenExpiresAt: tokenResponse.expires_in
+          ? new Date(Date.now() + tokenResponse.expires_in * 1000).toISOString()
+          : null,
+        phoneNumbers,
+      });
+    } catch (callbackError: any) {
+      return sendEmbeddedSignupCallbackPage(res, {
+        success: false,
+        error: callbackError?.response?.data?.error?.message || callbackError?.message || "Could not finish WhatsApp Embedded Signup",
+        workspaceId: state?.workspaceId || null,
+      });
+    }
+  });
+
+  app.post("/api/meta/embedded-signup/finalize", requireAuth, requireSubscribedWorkspaceFromBody, async (req, res) => {
+    const {
+      workspaceId,
+      phoneNumberId,
+      displayPhoneNumber,
+      wabaId,
+      businessId,
+      accessToken,
+      tokenExpiresAt,
+      verifiedName,
+      businessName,
+      name,
+    } = req.body;
+
+    const normalizedWorkspaceId = String(workspaceId || '').trim();
+    const normalizedPhoneNumberId = String(phoneNumberId || '').trim();
+    const normalizedDisplayPhone = formatMetaDisplayPhoneNumber(displayPhoneNumber);
+    const normalizedAccessToken = String(accessToken || '').trim();
+
+    if (!normalizedWorkspaceId || !normalizedPhoneNumberId || !normalizedDisplayPhone || !normalizedAccessToken) {
+      return res.status(400).json({ error: "Workspace, phone number, and Meta token are required" });
+    }
+
+    const existingByMetaId = await prisma.whatsAppNumber.findUnique({
+      where: { metaPhoneNumberId: normalizedPhoneNumberId }
+    });
+
+    const existingByPhone = existingByMetaId
+      ? null
+      : await prisma.whatsAppNumber.findFirst({
+          where: {
+            workspaceId: normalizedWorkspaceId,
+            phoneNumber: normalizedDisplayPhone
+          }
+        });
+
+    const existing = existingByMetaId || existingByPhone;
+    const nextName = String(name || verifiedName || businessName || normalizedDisplayPhone).trim() || normalizedDisplayPhone;
+    const nextTokenExpiresAt = tokenExpiresAt ? new Date(tokenExpiresAt) : null;
+    const movingAcrossWorkspaces = Boolean(existing && existing.workspaceId !== normalizedWorkspaceId);
+
+    const data = {
+      name: nextName,
+      phoneNumber: normalizedDisplayPhone,
+      status: 'CONNECTED',
+      connectionSource: 'EMBEDDED_SIGNUP',
+      metaPhoneNumberId: normalizedPhoneNumberId,
+      metaWabaId: String(wabaId || '').trim() || null,
+      metaBusinessId: String(businessId || '').trim() || null,
+      metaAccessToken: normalizedAccessToken,
+      metaTokenExpiresAt: nextTokenExpiresAt,
+      workspaceId: normalizedWorkspaceId,
+      autoReply: movingAcrossWorkspaces ? false : existing?.autoReply ?? false,
+      chatbotId: movingAcrossWorkspaces ? null : existing?.chatbotId ?? null,
+    };
+
+    const savedNumber = existing
+      ? await prisma.whatsAppNumber.update({
+          where: { id: existing.id },
+          data,
+        })
+      : await prisma.whatsAppNumber.create({
+          data,
+        });
+
+    res.json(savedNumber);
   });
 
   // Stripe Checkout
@@ -835,7 +2019,7 @@ async function startServer() {
   });
 
   // AI Chatbot Query
-  app.post("/api/chatbots/query", requireAuth, async (req, res) => {
+  app.post("/api/chatbots/query", requireAuth, async (req: any, res) => {
     const { chatbotId, message, conversationId } = req.body;
 
     try {
@@ -845,6 +2029,22 @@ async function startServer() {
 
       if (!chatbot || !chatbot.enabled) {
         return res.status(404).json({ error: "Chatbot not found or disabled" });
+      }
+
+      const membership = await prisma.workspaceMembership.findFirst({
+        where: {
+          workspaceId: chatbot.workspaceId,
+          userId: req.user.userId,
+        },
+        include: { workspace: true },
+      });
+
+      if (!membership) {
+        return res.status(403).json({ error: "Workspace access denied" });
+      }
+
+      if (!membership.workspace || !hasSubscription(membership.workspace.subscriptionStatus)) {
+        return res.status(403).json({ error: "Choose a paid plan to use AI chatbots" });
       }
 
       const responseText = await getAIResponse(chatbot, message);
@@ -880,11 +2080,12 @@ async function startServer() {
     }
   });
 
-  app.post("/api/ai/reply-suggestions", requireAuth, async (req, res) => {
+  app.post("/api/ai/reply-suggestions", requireAuth, requireSubscribedWorkspaceFromBody, async (req, res) => {
     const history = Array.isArray(req.body?.history) ? req.body.history : [];
+    const workspaceId = String(req.body?.workspaceId || '').trim() || null;
 
     try {
-      const suggestions = await generateAIReplySuggestions(history);
+      const suggestions = await generateAIReplySuggestions(history, workspaceId);
       if (!suggestions.length) {
         return res.status(500).json({ error: "No AI provider configured or AI failed" });
       }
@@ -894,11 +2095,12 @@ async function startServer() {
     }
   });
 
-  app.post("/api/ai/summarize", requireAuth, async (req, res) => {
+  app.post("/api/ai/summarize", requireAuth, requireSubscribedWorkspaceFromBody, async (req, res) => {
     const history = Array.isArray(req.body?.history) ? req.body.history : [];
+    const workspaceId = String(req.body?.workspaceId || '').trim() || null;
 
     try {
-      const summary = await generateAISummary(history);
+      const summary = await generateAISummary(history, workspaceId);
       if (!summary) {
         return res.status(500).json({ error: "No AI provider configured or AI failed" });
       }
@@ -935,7 +2137,9 @@ async function startServer() {
           const workspaceNumbers = await prisma.whatsAppNumber.findMany();
           const displayDigits = normalizePhone(metadata.display_phone_number);
           const receiptChannel = workspaceNumbers.find(
-            (candidate) => normalizePhone(candidate.phoneNumber) === displayDigits
+            (candidate) =>
+              (candidate.metaPhoneNumberId && candidate.metaPhoneNumberId === metadata?.phone_number_id) ||
+              normalizePhone(candidate.phoneNumber) === displayDigits
           );
 
           if (receiptChannel) {
@@ -1007,7 +2211,11 @@ async function startServer() {
         // Meta returns display numbers without punctuation, so normalize before matching.
         const numbers = await prisma.whatsAppNumber.findMany();
         const displayDigits = normalizePhone(displayPhoneNumber);
-        const number = numbers.find((candidate) => normalizePhone(candidate.phoneNumber) === displayDigits);
+        const number = numbers.find(
+          (candidate) =>
+            (candidate.metaPhoneNumberId && candidate.metaPhoneNumberId === phoneNumberId) ||
+            normalizePhone(candidate.phoneNumber) === displayDigits
+        );
 
         if (number) {
           // Find or create contact
@@ -1023,8 +2231,16 @@ async function startServer() {
               data: {
                 name: value.contacts?.[0]?.profile?.name || from,
                 phoneNumber: from,
-                workspaceId: number.workspaceId
+                workspaceId: number.workspaceId,
+                lastActivityAt: new Date(),
               }
+            });
+          } else {
+            contact = await prisma.contact.update({
+              where: { id: contact.id },
+              data: {
+                lastActivityAt: new Date(),
+              },
             });
           }
 
@@ -1065,7 +2281,8 @@ async function startServer() {
               mediaFilename: incomingPayload.type === 'TEXT' ? null : incomingPayload.mediaFilename,
               direction: 'INCOMING',
               senderType: 'USER',
-              status: 'READ'
+              status: 'READ',
+              readAt: null,
             }
           });
 
@@ -1111,10 +2328,11 @@ async function startServer() {
             if (chatbot && chatbot.enabled) {
               const aiResponse = await getAIResponse(chatbot, incomingPayload.aiInput);
               if (aiResponse) {
+                const whatsAppConfig = getWhatsAppChannelConfig(number);
                 // Send back to WhatsApp
                 await sendMetaMessage(from, aiResponse, 'whatsapp', {
-                  accessToken: process.env.META_ACCESS_TOKEN || "",
-                  phoneNumberId: phoneNumberId
+                  accessToken: whatsAppConfig.accessToken,
+                  phoneNumberId: whatsAppConfig.phoneNumberId || phoneNumberId
                 });
 
                 // Save AI message
@@ -1166,8 +2384,16 @@ async function startServer() {
             contact = await prisma.contact.create({
               data: {
                 instagramId: senderId,
-                workspaceId: account.workspaceId
+                workspaceId: account.workspaceId,
+                lastActivityAt: new Date(),
               }
+            });
+          } else {
+            contact = await prisma.contact.update({
+              where: { id: contact.id },
+              data: {
+                lastActivityAt: new Date(),
+              },
             });
           }
 
@@ -1199,7 +2425,8 @@ async function startServer() {
               content: text,
               direction: 'INCOMING',
               senderType: 'USER',
-              status: 'READ'
+              status: 'READ',
+              readAt: null,
             }
           });
 
@@ -1306,6 +2533,102 @@ async function startServer() {
     }
   });
 
+  app.post("/api/auth/forgot-password", async (req, res) => {
+    const email = String(req.body?.email || '').trim().toLowerCase();
+    if (!email) {
+      return res.status(400).json({ error: "Email is required" });
+    }
+
+    const user = await prisma.user.findUnique({ where: { email } });
+    let resetUrl: string | null = null;
+
+    if (user?.id) {
+      const { token, tokenHash } = createPasswordResetToken();
+      const expiresAt = new Date(Date.now() + 60 * 60 * 1000);
+
+      await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          passwordResetTokenHash: tokenHash,
+          passwordResetExpiresAt: expiresAt,
+        }
+      });
+
+      const appBaseUrl = (process.env.APP_URL || req.headers.origin || `${req.protocol}://${req.get('host')}`).replace(/\/$/, '');
+      resetUrl = `${appBaseUrl}/reset-password?token=${token}`;
+      console.log(`Password reset requested for ${email}. Reset URL: ${resetUrl}`);
+    }
+
+    res.json({
+      success: true,
+      message: "If the account exists, a reset link is ready.",
+      resetUrl,
+    });
+  });
+
+  app.get("/api/auth/reset-password/validate", async (req, res) => {
+    const token = String(req.query?.token || '').trim();
+    if (!token) {
+      return res.status(400).json({ error: "Reset token is required" });
+    }
+
+    const tokenHash = hashPasswordResetToken(token);
+    const user = await prisma.user.findFirst({
+      where: {
+        passwordResetTokenHash: tokenHash,
+        passwordResetExpiresAt: {
+          gt: new Date(),
+        }
+      },
+      select: { id: true }
+    });
+
+    if (!user) {
+      return res.status(400).json({ error: "This password reset link is invalid or has expired" });
+    }
+
+    res.json({ success: true });
+  });
+
+  app.post("/api/auth/reset-password", async (req, res) => {
+    const token = String(req.body?.token || '').trim();
+    const password = String(req.body?.password || '');
+
+    if (!token || !password) {
+      return res.status(400).json({ error: "Reset token and new password are required" });
+    }
+
+    if (password.length < 8) {
+      return res.status(400).json({ error: "Password must be at least 8 characters" });
+    }
+
+    const tokenHash = hashPasswordResetToken(token);
+    const user = await prisma.user.findFirst({
+      where: {
+        passwordResetTokenHash: tokenHash,
+        passwordResetExpiresAt: {
+          gt: new Date(),
+        }
+      }
+    });
+
+    if (!user) {
+      return res.status(400).json({ error: "This password reset link is invalid or has expired" });
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        password: hashedPassword,
+        passwordResetTokenHash: null,
+        passwordResetExpiresAt: null,
+      }
+    });
+
+    res.json({ success: true });
+  });
+
   app.post("/api/auth/login", async (req, res) => {
     const { email, password } = req.body;
     const user = await prisma.user.findUnique({
@@ -1402,6 +2725,53 @@ async function startServer() {
     }
   });
 
+  const withDashboardAccess =
+    (section?: (summary: Awaited<ReturnType<typeof getDashboardSections>>) => unknown) =>
+    async (req: any, res: any, next: any) => {
+      try {
+        const workspaceId = String(req.query.workspaceId || '').trim();
+        if (!workspaceId) {
+          return res.status(400).json({ error: 'Workspace is required' });
+        }
+
+        const membership = await prisma.workspaceMembership.findFirst({
+          where: { workspaceId, userId: req.user.userId },
+          include: { workspace: true },
+        });
+
+        if (!membership) {
+          return res.status(403).json({ error: 'Workspace access denied' });
+        }
+
+        const user = await getUserByToken(req);
+        if (!user?.emailVerified) {
+          return res.status(403).json({ error: 'Verify your email before using this feature' });
+        }
+
+        if (!hasSubscription(membership.workspace.subscriptionStatus)) {
+          return res.status(403).json({ error: 'Subscribe to a plan to use this feature' });
+        }
+
+        const summary = await getDashboardSections(workspaceId, req.query);
+        res.json(section ? section(summary) : summary);
+      } catch (error) {
+        next(error);
+      }
+    };
+
+  app.get("/api/dashboard/summary", requireAuth, withDashboardAccess());
+  app.get("/api/dashboard/overview", requireAuth, withDashboardAccess((summary) => summary.overview));
+  app.get("/api/dashboard/pipeline", requireAuth, withDashboardAccess((summary) => summary.pipeline));
+  app.get("/api/dashboard/inbox", requireAuth, withDashboardAccess((summary) => summary.inbox));
+  app.get("/api/dashboard/team", requireAuth, withDashboardAccess((summary) => summary.team));
+  app.get("/api/dashboard/campaigns", requireAuth, withDashboardAccess((summary) => summary.campaigns));
+  app.get("/api/dashboard/chatbot", requireAuth, withDashboardAccess((summary) => summary.chatbot));
+  app.get("/api/dashboard/channels", requireAuth, withDashboardAccess((summary) => summary.channels));
+  app.get("/api/dashboard/alerts", requireAuth, withDashboardAccess((summary) => ({
+    meta: summary.meta,
+    alerts: summary.alerts,
+  })));
+
   // Inbox Routes
   app.get("/api/conversations", requireAuth, async (req, res) => {
     const { workspaceId } = req.query;
@@ -1434,6 +2804,18 @@ async function startServer() {
   });
 
   app.get("/api/conversations/:id", requireAuth, async (req, res) => {
+    await prisma.message.updateMany({
+      where: {
+        conversationId: req.params.id,
+        direction: 'INCOMING',
+        isInternal: false,
+        readAt: null,
+      },
+      data: {
+        readAt: new Date(),
+      },
+    });
+
     const conversation = await prisma.conversation.findUnique({
       where: { id: req.params.id },
       include: { 
@@ -1464,7 +2846,8 @@ async function startServer() {
         include: {
           conversation: {
             include: {
-              instagramAccount: true
+              instagramAccount: true,
+              number: true,
             }
           }
         }
@@ -1488,7 +2871,7 @@ async function startServer() {
       const accessToken =
         message.conversation.channelType === 'INSTAGRAM'
           ? message.conversation.instagramAccount?.accessToken || process.env.META_ACCESS_TOKEN || ""
-          : process.env.META_ACCESS_TOKEN || "";
+          : getWhatsAppChannelConfig(message.conversation.number).accessToken;
 
       if (!accessToken) {
         return res.status(400).json({ error: "Meta media access token is not configured" });
@@ -1605,7 +2988,8 @@ async function startServer() {
         senderType,
         senderName,
         isInternal: isInternal || false,
-        status: 'SENT'
+        status: 'SENT',
+        readAt: direction === 'INCOMING' && !isInternal ? null : undefined,
       }
     });
     
@@ -1631,6 +3015,11 @@ async function startServer() {
     await prisma.conversation.update({
       where: { id: conversationId },
       data: updateData
+    });
+
+    await prisma.contact.update({
+      where: { id: conversation.contactId },
+      data: { lastActivityAt: new Date() }
     });
 
     // Automation Rules Engine
@@ -1721,9 +3110,10 @@ async function startServer() {
       if (!isInternalMessage) {
         if (conversation.channelType === 'WHATSAPP') {
           const to = normalizePhone(conversation.contact.phoneNumber);
-          const phoneNumberId = process.env.META_PHONE_NUMBER_ID || "";
+          const whatsAppConfig = getWhatsAppChannelConfig(conversation.number);
+          const phoneNumberId = whatsAppConfig.phoneNumberId;
 
-          if (!to || !phoneNumberId || !process.env.META_ACCESS_TOKEN) {
+          if (!to || !phoneNumberId || !whatsAppConfig.accessToken) {
             return res.status(400).json({ error: "WhatsApp channel is not fully configured" });
           }
 
@@ -1732,7 +3122,7 @@ async function startServer() {
               to,
               attachment,
               {
-                accessToken: process.env.META_ACCESS_TOKEN,
+                accessToken: whatsAppConfig.accessToken,
                 phoneNumberId
               },
               content?.trim() || undefined
@@ -1755,14 +3145,14 @@ async function startServer() {
                 senderType: 'USER',
                 senderName,
                 isInternal: isInternalMessage,
-                status: 'SENT'
+                status: 'SENT',
               }
             }));
           }
 
           if (content?.trim() && attachments.length === 0) {
             await sendMetaMessage(to, content, 'whatsapp', {
-              accessToken: process.env.META_ACCESS_TOKEN,
+              accessToken: whatsAppConfig.accessToken,
               phoneNumberId
             });
           }
@@ -1797,6 +3187,11 @@ async function startServer() {
           lastMessageAt: new Date(),
           aiPaused: !isInternalMessage ? true : conversation.aiPaused
         }
+      });
+
+      await prisma.contact.update({
+        where: { id: conversation.contactId },
+        data: { lastActivityAt: new Date() }
       });
 
       if (isInternalMessage) {
@@ -1899,13 +3294,13 @@ async function startServer() {
   });
 
   app.post("/api/chatbots", requireAuth, requireSubscribedWorkspaceFromBody, async (req, res) => {
-    const { workspaceId, name, instructions, model } = req.body;
+    const { workspaceId, name, instructions } = req.body;
     const chatbot = await prisma.chatbot.create({
       data: {
         workspaceId,
         name,
         instructions,
-        model: model || 'gpt-4o-mini',
+        model: FIXED_CHATBOT_MODEL,
         enabled: true
       },
       include: { numbers: true, instagramAccounts: true, tools: true }
@@ -1917,13 +3312,13 @@ async function startServer() {
     const chatbot = await prisma.chatbot.findUnique({ where: { id: req.params.id } });
     return requireSubscribedWorkspaceById(req, res, next, chatbot?.workspaceId);
   }, async (req, res) => {
-    const { name, instructions, model, enabled, language } = req.body;
+    const { name, instructions, enabled, language } = req.body;
     const chatbot = await prisma.chatbot.update({
       where: { id: req.params.id },
       data: {
         name,
         instructions,
-        model,
+        model: FIXED_CHATBOT_MODEL,
         enabled,
         language
       },
@@ -2161,7 +3556,7 @@ async function startServer() {
   });
 
   app.post("/api/contacts", requireAuth, requireSubscribedWorkspaceFromBody, async (req, res) => {
-    const { workspaceId, name, phoneNumber, instagramUsername, pipelineStage, city, leadSource, tags, notes, assignedToId, listIds, listNames } = req.body;
+    const { workspaceId, name, phoneNumber, instagramUsername, pipelineStage, city, leadSource, tags, notes, assignedToId, listIds, listNames, estimatedValue, lostReason } = req.body;
 
     if (!workspaceId) {
       return res.status(400).json({ error: "Workspace is required" });
@@ -2181,9 +3576,12 @@ async function startServer() {
         instagramUsername: instagramUsername?.trim() || null,
         pipelineStage: pipelineStage || 'NEW_LEAD',
         city: city?.trim() || null,
+        estimatedValue: Number(estimatedValue || 0) || 0,
+        lostReason: lostReason?.trim() || null,
         leadSource: leadSource?.trim() || null,
         tags: tags?.trim() || null,
         notes: notes?.trim() || null,
+        lastActivityAt: new Date(),
         assignedToId: assignedToId || null,
         listMemberships: resolvedListIds.length > 0
           ? {
@@ -2230,7 +3628,7 @@ async function startServer() {
   });
 
   app.patch("/api/contacts/:id", requireAuth, requireSubscribedContact, async (req, res) => {
-    const { pipelineStage, name, phoneNumber, city, leadSource, tags, notes, assignedToId, listIds, listNames } = req.body;
+    const { pipelineStage, name, phoneNumber, city, leadSource, tags, notes, assignedToId, listIds, listNames, estimatedValue, lostReason } = req.body;
     const oldContact = await prisma.contact.findUnique({ where: { id: req.params.id } });
 
     const shouldSyncLists = Array.isArray(listIds) || Array.isArray(listNames);
@@ -2252,9 +3650,12 @@ async function startServer() {
         name,
         phoneNumber,
         city,
+        estimatedValue: estimatedValue === undefined ? undefined : Number(estimatedValue || 0) || 0,
+        lostReason: lostReason === undefined ? undefined : lostReason?.trim() || null,
         leadSource,
         tags,
         notes,
+        lastActivityAt: new Date(),
         assignedToId,
         listMemberships: shouldSyncLists
           ? {
@@ -2576,8 +3977,7 @@ async function startServer() {
       return res.status(400).json({ error: "Selected sender is not an active WhatsApp channel" });
     }
 
-    const accessToken = process.env.META_ACCESS_TOKEN || "";
-    const phoneNumberId = process.env.META_PHONE_NUMBER_ID || "";
+    const { accessToken, phoneNumberId } = getWhatsAppChannelConfig(number);
     const to = normalizePhone(phoneNumber);
 
     if (!accessToken || !phoneNumberId || !to) {
@@ -2695,8 +4095,7 @@ async function startServer() {
       return res.json(campaign);
     }
 
-    const accessToken = process.env.META_ACCESS_TOKEN || "";
-    const phoneNumberId = process.env.META_PHONE_NUMBER_ID || "";
+    const { accessToken, phoneNumberId } = getWhatsAppChannelConfig(number);
 
     if (!accessToken || !phoneNumberId) {
       return res.status(400).json({ error: "WhatsApp broadcast sending is not fully configured" });
@@ -2760,13 +4159,42 @@ async function startServer() {
   });
 
   // Billing
-  app.get("/api/billing/ledger", requireAuth, async (req, res) => {
+  app.get("/api/billing/summary", requireAuth, async (req: any, res, next) => {
+    return requireWorkspaceAccessById(req, res, next, req.query.workspaceId as string);
+  }, async (req, res) => {
+    const workspaceId = req.query.workspaceId as string;
+    const summary = await getWorkspaceBillingSummary(workspaceId);
+    res.json({
+      balance: summary.balance,
+      totalCredits: summary.totalCredits,
+      totalDebits: summary.totalDebits,
+      aiTokensUsed: summary.aiTokensUsed,
+      aiSpend: summary.aiSpend,
+      usageEvents: summary.usageEvents,
+    });
+  });
+
+  app.get("/api/billing/ledger", requireAuth, async (req: any, res, next) => {
+    return requireWorkspaceAccessById(req, res, next, req.query.workspaceId as string);
+  }, async (req, res) => {
     const { workspaceId } = req.query;
     const ledger = await prisma.billingLedgerEntry.findMany({
       where: { workspaceId: workspaceId as string },
       orderBy: { createdAt: 'desc' }
     });
     res.json(ledger);
+  });
+
+  app.get("/api/billing/usage", requireAuth, async (req: any, res, next) => {
+    return requireWorkspaceAccessById(req, res, next, req.query.workspaceId as string);
+  }, async (req, res) => {
+    const usage = await prisma.usageLog.findMany({
+      where: {
+        workspaceId: req.query.workspaceId as string,
+      },
+      orderBy: { createdAt: 'desc' }
+    });
+    res.json(usage);
   });
 
   // Bootstrap Route

@@ -35,7 +35,7 @@ export default function Register() {
 
   useEffect(() => {
     if (user) {
-      navigate('/app/inbox', { replace: true });
+      navigate('/app/dashboard', { replace: true });
     }
   }, [navigate, user]);
 
@@ -47,7 +47,7 @@ export default function Register() {
     try {
       const res = await axios.post('/api/auth/register', { name, email, password });
       setUser(res.data.user, res.data.token);
-      navigate('/app/inbox');
+      navigate('/app/dashboard');
     } catch (err: any) {
       setError(err.response?.data?.error || 'Registration failed');
     }

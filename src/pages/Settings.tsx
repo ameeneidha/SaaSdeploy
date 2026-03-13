@@ -476,6 +476,16 @@ function Billing() {
   const location = useLocation();
   const { activeWorkspace, refreshWorkspaces, hasVerifiedEmail } = useApp();
   const [ledger, setLedger] = useState<any[]>([]);
+  const [usageLogs, setUsageLogs] = useState<any[]>([]);
+  const [billingSummary, setBillingSummary] = useState({
+    balance: 0,
+    totalCredits: 0,
+    totalDebits: 0,
+    aiTokensUsed: 0,
+    aiSpend: 0,
+    usageEvents: 0,
+  });
+  const [isBillingLoading, setIsBillingLoading] = useState(false);
 
   const currentPlan = activeWorkspace?.plan || 'NONE';
   const currentPlanInfo = getPlanConfig(currentPlan);
@@ -484,12 +494,37 @@ function Billing() {
     ? new Date(activeWorkspace.subscriptionCurrentPeriodEnd)
     : null;
 
-  useEffect(() => {
-    if (activeWorkspace) {
-      axios.get(`/api/billing/ledger?workspaceId=${activeWorkspace.id}`)
-        .then(res => setLedger(res.data));
+  const fetchBillingData = async () => {
+    if (!activeWorkspace?.id) return;
+
+    setIsBillingLoading(true);
+    try {
+      const [ledgerRes, usageRes, summaryRes] = await Promise.all([
+        axios.get(`/api/billing/ledger?workspaceId=${activeWorkspace.id}`),
+        axios.get(`/api/billing/usage?workspaceId=${activeWorkspace.id}`),
+        axios.get(`/api/billing/summary?workspaceId=${activeWorkspace.id}`),
+      ]);
+
+      setLedger(Array.isArray(ledgerRes.data) ? ledgerRes.data : []);
+      setUsageLogs(Array.isArray(usageRes.data) ? usageRes.data : []);
+      setBillingSummary({
+        balance: Number(summaryRes.data?.balance || 0),
+        totalCredits: Number(summaryRes.data?.totalCredits || 0),
+        totalDebits: Number(summaryRes.data?.totalDebits || 0),
+        aiTokensUsed: Number(summaryRes.data?.aiTokensUsed || 0),
+        aiSpend: Number(summaryRes.data?.aiSpend || 0),
+        usageEvents: Number(summaryRes.data?.usageEvents || 0),
+      });
+    } catch (error) {
+      console.error('Failed to fetch billing data', error);
+    } finally {
+      setIsBillingLoading(false);
     }
-  }, [activeWorkspace]);
+  };
+
+  useEffect(() => {
+    fetchBillingData();
+  }, [activeWorkspace?.id]);
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);
@@ -503,9 +538,27 @@ function Billing() {
           refreshWorkspaces().catch((error) => {
             console.error('Failed to refresh workspaces after checkout', error);
           });
+          fetchBillingData().catch((error) => {
+            console.error('Failed to refresh billing data after checkout', error);
+          });
         });
     }
   }, [activeWorkspace, location.search, refreshWorkspaces]);
+
+  const formatCreditValue = (value: number) => {
+    const absValue = Math.abs(value);
+    const precision = absValue > 0 && absValue < 1 ? 4 : 2;
+    return value.toLocaleString(undefined, {
+      minimumFractionDigits: precision,
+      maximumFractionDigits: precision,
+    });
+  };
+
+  const formatUsdValue = (value: number) =>
+    value.toLocaleString(undefined, {
+      minimumFractionDigits: value > 0 && value < 1 ? 4 : 2,
+      maximumFractionDigits: value > 0 && value < 1 ? 4 : 2,
+    });
 
   return (
     <div className="space-y-12">
@@ -608,18 +661,36 @@ function Billing() {
               <div className="bg-white dark:bg-slate-900 p-8 rounded-2xl border border-gray-100 dark:border-slate-800 shadow-sm transition-colors">
                 <div className="flex items-center justify-between mb-6">
                   <h3 className="font-semibold text-gray-900 dark:text-white">Credit Balance</h3>
-                  <button className="p-2 text-gray-400 hover:text-[#25D366] transition-colors"><RefreshCw className="w-4 h-4" /></button>
+                  <button
+                    onClick={() => fetchBillingData()}
+                    className="p-2 text-gray-400 hover:text-[#25D366] transition-colors"
+                    disabled={isBillingLoading}
+                  >
+                    <RefreshCw className={cn("w-4 h-4", isBillingLoading && "animate-spin")} />
+                  </button>
                 </div>
                 <div className="flex items-baseline gap-2 mb-2">
-                  <span className="text-4xl font-bold text-gray-900 dark:text-white">500.00</span>
+                  <span className="text-4xl font-bold text-gray-900 dark:text-white">{formatCreditValue(billingSummary.balance)}</span>
                   <span className="text-sm font-medium text-gray-400 dark:text-gray-500 uppercase">Credits</span>
                 </div>
                 <p className="text-[10px] text-gray-400 dark:text-gray-500 mb-6 leading-relaxed">
-                  Credits are used exclusively for AI chatbot API charges and token usage. Meta's WhatsApp conversation charges are handled directly through your WhatsApp Business Account (WABA).
+                  GPT-5 nano usage now creates real debit entries from token consumption. The balance below is calculated from your workspace ledger, while WhatsApp conversation charges stay on your own WABA billing.
                 </p>
-                <button className="w-full py-3 bg-[#25D366] text-white font-bold rounded-xl hover:bg-[#128C7E] transition-all shadow-sm shadow-[#25D366]/20">
-                  Add to Credit Balance
-                </button>
+                <div className="grid grid-cols-2 gap-3 mb-6">
+                  <div className="rounded-xl bg-slate-50 px-4 py-3 dark:bg-slate-800/60">
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500">AI Spend</p>
+                    <p className="mt-1 text-lg font-semibold text-gray-900 dark:text-white">${formatUsdValue(billingSummary.aiSpend)}</p>
+                  </div>
+                  <div className="rounded-xl bg-slate-50 px-4 py-3 dark:bg-slate-800/60">
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500">Tokens Used</p>
+                    <p className="mt-1 text-lg font-semibold text-gray-900 dark:text-white">{billingSummary.aiTokensUsed.toLocaleString()}</p>
+                  </div>
+                </div>
+                <div className="rounded-xl border border-dashed border-gray-200 px-4 py-3 text-xs text-gray-500 dark:border-slate-700 dark:text-gray-400">
+                  {billingSummary.usageEvents > 0
+                    ? `${billingSummary.usageEvents} AI usage event${billingSummary.usageEvents === 1 ? '' : 's'} recorded for this workspace.`
+                    : 'No AI usage has been recorded for this workspace yet.'}
+                </div>
               </div>
             </div>
           </div>
@@ -695,7 +766,11 @@ function Billing() {
                       window.location.href = res.data.url;
                     } catch (e) {
                       console.error('Stripe Error:', e);
-                      toast.error('Failed to start checkout');
+                      if (axios.isAxiosError(e)) {
+                        toast.error(e.response?.data?.error || 'Failed to start checkout');
+                      } else {
+                        toast.error('Failed to start checkout');
+                      }
                     }
                   }}
                   className={cn(
@@ -721,28 +796,31 @@ function Billing() {
                 <tr className="bg-gray-50/50 dark:bg-slate-800/50 border-b border-gray-100 dark:border-slate-800 transition-colors">
                   <th className="px-6 py-4 text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Date</th>
                   <th className="px-6 py-4 text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Description</th>
-                  <th className="px-6 py-4 text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Type</th>
-                  <th className="px-6 py-4 text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wider text-right">Amount</th>
+                  <th className="px-6 py-4 text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Tokens</th>
+                  <th className="px-6 py-4 text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wider text-right">Cost (USD)</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50 dark:divide-slate-800 transition-colors">
-                {ledger.map((entry) => (
+                {usageLogs.length > 0 ? usageLogs.map((entry) => (
                   <tr key={entry.id} className="hover:bg-gray-50/50 dark:hover:bg-slate-800/50 transition-colors">
-                    <td className="px-6 py-4 text-xs text-gray-500 dark:text-gray-400">{format(new Date(entry.createdAt), 'MMM dd, yyyy')}</td>
-                    <td className="px-6 py-4 text-sm font-medium text-gray-900 dark:text-white">{entry.description}</td>
-                    <td className="px-6 py-4">
-                      <span className={cn(
-                        "px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider",
-                        entry.type === 'CREDIT' ? "bg-green-50 dark:bg-green-900/20 text-green-600 dark:text-green-400" : "bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400"
-                      )}>
-                        {entry.type}
-                      </span>
+                    <td className="px-6 py-4 text-xs text-gray-500 dark:text-gray-400">{format(new Date(entry.createdAt), 'MMM dd, yyyy HH:mm')}</td>
+                    <td className="px-6 py-4 text-sm font-medium text-gray-900 dark:text-white">
+                      {entry.type === 'AI_TOKEN' ? 'GPT-5 nano token usage' : entry.type}
+                    </td>
+                    <td className="px-6 py-4 text-sm text-gray-600 dark:text-gray-300">
+                      {Number(entry.quantity || 0).toLocaleString()}
                     </td>
                     <td className="px-6 py-4 text-sm font-bold text-gray-900 dark:text-white text-right">
-                      {entry.type === 'CREDIT' ? '+' : '-'}{entry.amount.toFixed(2)}
+                      ${formatUsdValue(Number(entry.cost || 0))}
                     </td>
                   </tr>
-                ))}
+                )) : (
+                  <tr>
+                    <td colSpan={4} className="px-6 py-12 text-center text-sm text-gray-400 dark:text-gray-600 italic">
+                      No AI token usage has been recorded yet.
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
