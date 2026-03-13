@@ -46,9 +46,12 @@ const navItems = [
 
 export default function Sidebar() {
   const location = useLocation();
-  const { user, workspaces, activeWorkspace, setActiveWorkspace, setUser, hasFullAccess } = useApp();
+  const { user, workspaces, activeWorkspace, setActiveWorkspace, setUser, hasFullAccess, isSuperadmin } = useApp();
   const { theme, toggleTheme } = useTheme();
   const displayName = getDisplayName(user?.name, user?.email);
+  const visibleNavItems = isSuperadmin
+    ? [{ icon: ShieldAlert, label: 'Superadmin', path: '/app/superadmin' }]
+    : navItems;
 
   return (
     <div className="w-20 bg-white dark:bg-slate-900 border-r border-gray-100 dark:border-slate-800 flex flex-col items-center py-6 h-screen sticky top-0 transition-colors">
@@ -59,9 +62,9 @@ export default function Sidebar() {
       </div>
 
       <nav className="flex-1 flex flex-col gap-4">
-        {navItems.map((item) => {
+        {visibleNavItems.map((item) => {
           const isActive = location.pathname.startsWith(item.path);
-          const isLocked = !hasFullAccess && item.path !== '/app/inbox';
+          const isLocked = !isSuperadmin && !hasFullAccess && item.path !== '/app/inbox';
           return (
             <div key={item.path}>
               <AppTooltip content={isLocked ? `${item.label} locked until subscription` : item.label}>
@@ -83,21 +86,6 @@ export default function Sidebar() {
           );
         })}
 
-        {user?.email === 'ameeneidha@gmail.com' && (
-          <AppTooltip content="Superadmin">
-            <Link
-              to="/app/superadmin"
-              className={cn(
-                "w-12 h-12 rounded-xl flex items-center justify-center transition-all relative",
-                location.pathname.startsWith('/app/superadmin') 
-                  ? "bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400" 
-                  : "text-gray-400 hover:bg-red-50 dark:hover:bg-red-900/10 hover:text-red-600 dark:hover:text-red-400"
-              )}
-            >
-              <ShieldAlert className="w-6 h-6" />
-            </Link>
-          </AppTooltip>
-        )}
       </nav>
 
       <div className="mt-auto flex flex-col gap-4">
@@ -133,76 +121,92 @@ export default function Sidebar() {
                 <p className="text-xs text-gray-500 dark:text-gray-400">{user?.email}</p>
               </div>
 
-              <DropdownMenu.Label className="px-3 py-1.5 text-[10px] font-semibold text-gray-400 uppercase tracking-wider">
-                Workspaces
-              </DropdownMenu.Label>
-              
-              {workspaces.map((ws) => (
-                <DropdownMenu.Item 
-                  key={ws.id}
-                  onClick={() => setActiveWorkspace(ws)}
-                  className={cn(
-                    "flex items-center justify-between px-3 py-2 text-sm rounded-lg cursor-pointer outline-none transition-colors",
-                    activeWorkspace?.id === ws.id ? "bg-[#25D366]/10 text-[#25D366]" : "text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-800"
-                  )}
-                >
-                  {ws.name}
-                  {activeWorkspace?.id === ws.id && <ChevronRight className="w-4 h-4" />}
+              {!isSuperadmin && (
+                <>
+                  <DropdownMenu.Label className="px-3 py-1.5 text-[10px] font-semibold text-gray-400 uppercase tracking-wider">
+                    Workspaces
+                  </DropdownMenu.Label>
+                  
+                  {workspaces.map((ws) => (
+                    <DropdownMenu.Item 
+                      key={ws.id}
+                      onClick={() => setActiveWorkspace(ws)}
+                      className={cn(
+                        "flex items-center justify-between px-3 py-2 text-sm rounded-lg cursor-pointer outline-none transition-colors",
+                        activeWorkspace?.id === ws.id ? "bg-[#25D366]/10 text-[#25D366]" : "text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-800"
+                      )}
+                    >
+                      {ws.name}
+                      {activeWorkspace?.id === ws.id && <ChevronRight className="w-4 h-4" />}
+                    </DropdownMenu.Item>
+                  ))}
+
+                  <DropdownMenu.Item asChild>
+                    <Link to="/app/inbox" className="flex items-center gap-2 px-3 py-2 text-sm text-[#25D366] font-medium rounded-lg cursor-pointer outline-none hover:bg-[#25D366]/5 transition-colors">
+                      <Plus className="w-4 h-4" />
+                      New Workspace
+                    </Link>
+                  </DropdownMenu.Item>
+
+                  <DropdownMenu.Separator className="h-px bg-gray-100 dark:bg-slate-800 my-1" />
+                </>
+              )}
+
+              {!isSuperadmin && (
+                <DropdownMenu.Item asChild>
+                  <Link to="/app/settings/personal" className="flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 rounded-lg cursor-pointer outline-none hover:bg-gray-50 dark:hover:bg-slate-800 transition-colors">
+                    <Settings className="w-4 h-4" />
+                    Settings
+                  </Link>
                 </DropdownMenu.Item>
-              ))}
+              )}
 
-              <DropdownMenu.Item asChild>
-                <Link to="/app/inbox" className="flex items-center gap-2 px-3 py-2 text-sm text-[#25D366] font-medium rounded-lg cursor-pointer outline-none hover:bg-[#25D366]/5 transition-colors">
-                  <Plus className="w-4 h-4" />
-                  New Workspace
-                </Link>
-              </DropdownMenu.Item>
+              {!isSuperadmin && (
+                <DropdownMenu.Item asChild>
+                  <Link to="/app/team" className="flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 rounded-lg cursor-pointer outline-none hover:bg-gray-50 dark:hover:bg-slate-800 transition-colors">
+                    <Users className="w-4 h-4" />
+                    Team
+                  </Link>
+                </DropdownMenu.Item>
+              )}
 
-              <DropdownMenu.Separator className="h-px bg-gray-100 dark:bg-slate-800 my-1" />
+              {!isSuperadmin && (
+                <DropdownMenu.Item asChild>
+                  <Link to="/app/switch-account" className="flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 rounded-lg cursor-pointer outline-none hover:bg-gray-50 dark:hover:bg-slate-800 transition-colors">
+                    <UserCircle className="w-4 h-4" />
+                    Switch Account
+                  </Link>
+                </DropdownMenu.Item>
+              )}
 
-              <DropdownMenu.Item asChild>
-                <Link to="/app/settings/personal" className="flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 rounded-lg cursor-pointer outline-none hover:bg-gray-50 dark:hover:bg-slate-800 transition-colors">
-                  <Settings className="w-4 h-4" />
-                  Settings
-                </Link>
-              </DropdownMenu.Item>
+              {!isSuperadmin && <DropdownMenu.Separator className="h-px bg-gray-100 dark:bg-slate-800 my-1" />}
 
-              <DropdownMenu.Item asChild>
-                <Link to="/app/team" className="flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 rounded-lg cursor-pointer outline-none hover:bg-gray-50 dark:hover:bg-slate-800 transition-colors">
-                  <Users className="w-4 h-4" />
-                  Team
-                </Link>
-              </DropdownMenu.Item>
+              {!isSuperadmin && (
+                <DropdownMenu.Item asChild>
+                  <Link to="/app/web-chat-widget" className="flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 rounded-lg cursor-pointer outline-none hover:bg-gray-50 dark:hover:bg-slate-800 transition-colors">
+                    <MessageCircle className="w-4 h-4" />
+                    Web Chat Widget
+                  </Link>
+                </DropdownMenu.Item>
+              )}
 
-              <DropdownMenu.Item asChild>
-                <Link to="/app/switch-account" className="flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 rounded-lg cursor-pointer outline-none hover:bg-gray-50 dark:hover:bg-slate-800 transition-colors">
-                  <UserCircle className="w-4 h-4" />
-                  Switch Account
-                </Link>
-              </DropdownMenu.Item>
+              {!isSuperadmin && (
+                <DropdownMenu.Item asChild>
+                  <Link to="/app/feature-request" className="flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 rounded-lg cursor-pointer outline-none hover:bg-gray-50 dark:hover:bg-slate-800 transition-colors">
+                    <Lightbulb className="w-4 h-4" />
+                    Feature Request
+                  </Link>
+                </DropdownMenu.Item>
+              )}
 
-              <DropdownMenu.Separator className="h-px bg-gray-100 dark:bg-slate-800 my-1" />
-
-              <DropdownMenu.Item asChild>
-                <Link to="/app/web-chat-widget" className="flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 rounded-lg cursor-pointer outline-none hover:bg-gray-50 dark:hover:bg-slate-800 transition-colors">
-                  <MessageCircle className="w-4 h-4" />
-                  Web Chat Widget
-                </Link>
-              </DropdownMenu.Item>
-
-              <DropdownMenu.Item asChild>
-                <Link to="/app/feature-request" className="flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 rounded-lg cursor-pointer outline-none hover:bg-gray-50 dark:hover:bg-slate-800 transition-colors">
-                  <Lightbulb className="w-4 h-4" />
-                  Feature Request
-                </Link>
-              </DropdownMenu.Item>
-
-              <DropdownMenu.Item asChild>
-                <Link to="/app/report-issue" className="flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 rounded-lg cursor-pointer outline-none hover:bg-gray-50 dark:hover:bg-slate-800 transition-colors">
-                  <AlertCircle className="w-4 h-4" />
-                  Report Issue
-                </Link>
-              </DropdownMenu.Item>
+              {!isSuperadmin && (
+                <DropdownMenu.Item asChild>
+                  <Link to="/app/report-issue" className="flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 rounded-lg cursor-pointer outline-none hover:bg-gray-50 dark:hover:bg-slate-800 transition-colors">
+                    <AlertCircle className="w-4 h-4" />
+                    Report Issue
+                  </Link>
+                </DropdownMenu.Item>
+              )}
 
               <DropdownMenu.Separator className="h-px bg-gray-100 dark:bg-slate-800 my-1" />
 

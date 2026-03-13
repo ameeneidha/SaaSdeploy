@@ -12,10 +12,12 @@ export default function Login() {
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
+  const getPostLoginPath = (nextUser?: { email?: string | null }) =>
+    (nextUser?.email || '').toLowerCase() === 'ameeneidha@gmail.com' ? '/app/superadmin' : '/app/dashboard';
 
   useEffect(() => {
     if (user) {
-      navigate('/app/dashboard');
+      navigate(getPostLoginPath(user));
     }
   }, [user, navigate]);
 
@@ -26,7 +28,7 @@ export default function Login() {
     try {
       const res = await axios.post('/api/auth/login', { email, password });
       setUser(res.data.user, res.data.token);
-      navigate('/app/dashboard');
+      navigate(getPostLoginPath(res.data.user));
     } catch (err: any) {
       setError(err.response?.data?.error || 'Login failed');
     } finally {

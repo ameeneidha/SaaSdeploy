@@ -75,6 +75,8 @@ export default function Home() {
   const [name, setName] = useState('');
   const [billingCycle, setBillingCycle] = useState<BillingCycle>('monthly');
   const trustedTeamMarkers = ['MK', 'SA', 'LR', 'NH'];
+  const getPostLoginPath = (nextUser?: { email?: string | null }) =>
+    (nextUser?.email || '').toLowerCase() === 'ameeneidha@gmail.com' ? '/app/superadmin' : '/app/dashboard';
 
   const handlePlanSelect = (planId: string) => {
     sessionStorage.setItem('pendingPlan', planId);
@@ -91,7 +93,7 @@ export default function Home() {
       const payload = isSignUp ? { name, email, password } : { email, password };
       const response = await axios.post(endpoint, payload);
       setUser(response.data.user, response.data.token);
-      navigate('/app/dashboard');
+      navigate(getPostLoginPath(response.data.user));
     } catch (err: any) {
       setError(err.response?.data?.error || (isSignUp ? 'Registration failed' : 'Login failed'));
     } finally {
@@ -120,7 +122,7 @@ export default function Home() {
             {user ? (
               <button
                 type="button"
-                onClick={() => navigate('/app/dashboard')}
+                onClick={() => navigate(getPostLoginPath(user))}
                 className="rounded-full bg-slate-900 px-4 py-2 text-white transition-colors hover:bg-slate-800"
               >
                 Open Dashboard

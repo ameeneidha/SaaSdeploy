@@ -25,6 +25,7 @@ interface AppContextType {
   token: string | null;
   workspaces: Workspace[];
   activeWorkspace: Workspace | null;
+  isSuperadmin: boolean;
   hasVerifiedEmail: boolean;
   hasActiveSubscription: boolean;
   hasFullAccess: boolean;
@@ -36,6 +37,8 @@ interface AppContextType {
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
+const SUPERADMIN_EMAIL = 'ameeneidha@gmail.com';
+const isSuperadminUser = (user: User | null) => (user?.email || '').toLowerCase() === SUPERADMIN_EMAIL;
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
@@ -59,7 +62,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       axios.get(`/api/users/${parsedUser.id}`).then(res => {
         setUser(res.data);
         localStorage.setItem('user', JSON.stringify(res.data));
-        fetchWorkspaces(res.data.id);
+        if (isSuperadminUser(res.data)) {
+          setWorkspaces([]);
+          setActiveWorkspace(null);
+          setIsLoading(false);
+        } else {
+          fetchWorkspaces(res.data.id);
+        }
       }).catch(() => {
         // If user not found or token invalid, clear session
         handleSetUser(null, null);
@@ -83,19 +92,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return () => axios.interceptors.response.eject(interceptor);
   }, []);
 
-  const fetchWorkspaces = async (userId: string) => {
+  const fetchWorkspaces = async (_userId: string) => {
     try {
-      const res = await axios.get(`/api/workspaces?userId=${userId}`);
+      const res = await axios.get('/api/workspaces');
       const data = Array.isArray(res.data) ? res.data : [];
-      console.log('Workspaces fetched:', data.length);
       setWorkspaces(data);
       if (data.length > 0) {
         const savedWsId = localStorage.getItem('activeWorkspaceId');
         const ws = data.find((w: Workspace) => w.id === savedWsId) || data[0];
-        console.log('Setting active workspace:', ws.name);
         setActiveWorkspace(ws);
       } else {
-        console.warn('No workspaces found for user:', userId);
+        setActiveWorkspace(null);
       }
     } catch (error) {
       console.error('Failed to fetch workspaces', error);
@@ -111,7 +118,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       localStorage.setItem('user', JSON.stringify(u));
       localStorage.setItem('token', t);
       axios.defaults.headers.common['Authorization'] = `Bearer ${t}`;
-      fetchWorkspaces(u.id);
+      if (isSuperadminUser(u)) {
+        setWorkspaces([]);
+        setActiveWorkspace(null);
+        setIsLoading(false);
+      } else {
+        fetchWorkspaces(u.id);
+      }
     } else {
       localStorage.removeItem('user');
       localStorage.removeItem('token');
@@ -145,13 +158,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   };
 
   const refreshWorkspaces = async () => {
-    if (!user) return;
+    if (!user || isSuperadminUser(user)) return;
     await fetchWorkspaces(user.id);
   };
 
+  const isSuperadmin = isSuperadminUser(user);
   const hasVerifiedEmail = !!user?.emailVerified;
   const hasActiveSubscription = ['active', 'trialing'].includes((activeWorkspace?.subscriptionStatus || '').toLowerCase());
-  const hasFullAccess = hasVerifiedEmail && hasActiveSubscription;
+  const hasFullAccess = isSuperadmin || (hasVerifiedEmail && hasActiveSubscription);
 
   return (
     <AppContext.Provider value={{ 
@@ -159,6 +173,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       token,
       workspaces, 
       activeWorkspace, 
+      isSuperadmin,
       hasVerifiedEmail,
       hasActiveSubscription,
       hasFullAccess,

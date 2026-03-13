@@ -4,15 +4,174 @@ import bcrypt from 'bcryptjs';
 
 dotenv.config();
 
-async function main() {
-  console.log('Seeding database...');
-  const instagramAccountId = process.env.INSTAGRAM_ACCOUNT_ID || 'insta_123456';
-  const instagramAccessToken = process.env.INSTAGRAM_ACCESS_TOKEN || undefined;
-  const instagramUsername = process.env.INSTAGRAM_USERNAME || 'connected_instagram';
+const DEFAULT_PASSWORD = 'password123';
+const SUPERADMIN_EMAIL = 'ameeneidha@gmail.com';
+const SUPERADMIN_NAME = 'Ameen Eidha';
 
-  // Cleanup
+type DemoPlan = 'STARTER' | 'GROWTH' | 'PRO';
+
+type DemoAccount = {
+  plan: DemoPlan;
+  ownerName: string;
+  ownerEmail: string;
+  workspaceName: string;
+  workspaceSlug: string;
+  whatsappNumbers: Array<{ name: string; phoneNumber: string }>;
+  instagramAccounts: Array<{ name: string; instagramId: string; username: string }>;
+  contacts: Array<{
+    name: string;
+    phoneNumber?: string;
+    instagramId?: string;
+    instagramUsername?: string;
+    leadSource: string;
+    pipelineStage: string;
+    city: string;
+    initialMessage: string;
+    responseMessage: string;
+  }>;
+  templates: Array<{ name: string; content: string; category: string }>;
+  sessionTemplates: Array<{ name: string; content: string }>;
+  ledgerCredit: number;
+};
+
+const renewalDate = new Date();
+renewalDate.setDate(renewalDate.getDate() + 30);
+
+const demoAccounts: DemoAccount[] = [
+  {
+    plan: 'STARTER',
+    ownerName: 'Starter Demo Owner',
+    ownerEmail: 'starter@wabahub.local',
+    workspaceName: 'Starter Demo',
+    workspaceSlug: 'starter-demo',
+    whatsappNumbers: [{ name: 'Starter Line', phoneNumber: '+971500000101' }],
+    instagramAccounts: [{ name: 'Starter Instagram', instagramId: 'ig_starter_demo', username: 'starter_demo' }],
+    contacts: [
+      {
+        name: 'Noura Ali',
+        phoneNumber: '+971500001001',
+        leadSource: 'Website',
+        pipelineStage: 'NEW_LEAD',
+        city: 'Dubai',
+        initialMessage: 'Hi, I want more info about your basic package.',
+        responseMessage: 'Absolutely. I can walk you through the Starter package and what is included.',
+      },
+    ],
+    templates: [
+      { name: 'starter_welcome', content: 'Welcome to our Starter support desk. How can we help?', category: 'UTILITY' },
+      { name: 'starter_payment', content: 'Starter package payments can be completed securely online.', category: 'UTILITY' },
+    ],
+    sessionTemplates: [
+      { name: 'Starter Greeting', content: 'Hello! Thanks for contacting our Starter team. How can we help?' },
+      { name: 'Starter Follow-Up', content: 'Just following up on your Starter package inquiry. Let me know if you have questions.' },
+    ],
+    ledgerCredit: 120,
+  },
+  {
+    plan: 'GROWTH',
+    ownerName: 'Growth Demo Owner',
+    ownerEmail: 'growth@wabahub.local',
+    workspaceName: 'Growth Demo',
+    workspaceSlug: 'growth-demo',
+    whatsappNumbers: [
+      { name: 'Growth Sales', phoneNumber: '+971500000201' },
+      { name: 'Growth Support', phoneNumber: '+971500000202' },
+    ],
+    instagramAccounts: [{ name: 'Growth Instagram', instagramId: 'ig_growth_demo', username: 'growth_demo' }],
+    contacts: [
+      {
+        name: 'Omar Khan',
+        phoneNumber: '+971500002001',
+        leadSource: 'Instagram',
+        pipelineStage: 'CONTACTED',
+        city: 'Sharjah',
+        initialMessage: 'Can your team help us manage two branches from one inbox?',
+        responseMessage: 'Yes. Growth is designed for small teams with multiple agents and more automation.',
+      },
+      {
+        name: 'Clinic Prospect',
+        phoneNumber: '+971500002002',
+        leadSource: 'Referral',
+        pipelineStage: 'QUALIFIED',
+        city: 'Abu Dhabi',
+        initialMessage: 'We need reminders and broadcast messages for patients.',
+        responseMessage: 'Growth supports campaigns, automation, and shared team workflows for that.',
+      },
+    ],
+    templates: [
+      { name: 'growth_onboarding', content: 'Welcome to the Growth workspace. Let us help you scale your team inbox.', category: 'UTILITY' },
+      { name: 'growth_demo_booking', content: 'Here is your Growth demo booking confirmation and next steps.', category: 'UTILITY' },
+    ],
+    sessionTemplates: [
+      { name: 'Growth Intro', content: 'Hi! You are speaking with our Growth team. What are you trying to improve in your workflow?' },
+      { name: 'Growth Quote', content: 'I can prepare a Growth plan recommendation based on your channels and team size.' },
+    ],
+    ledgerCredit: 350,
+  },
+  {
+    plan: 'PRO',
+    ownerName: 'Pro Demo Owner',
+    ownerEmail: 'pro@wabahub.local',
+    workspaceName: 'Pro Demo',
+    workspaceSlug: 'pro-demo',
+    whatsappNumbers: [
+      { name: 'Pro Main Line', phoneNumber: '+1 555 136 3768' },
+      { name: 'Pro Sales East', phoneNumber: '+971500000301' },
+      { name: 'Pro Support', phoneNumber: '+971500000302' },
+    ],
+    instagramAccounts: [
+      { name: 'Pro Instagram One', instagramId: 'ig_pro_demo_1', username: 'pro_demo_one' },
+      { name: 'Pro Instagram Two', instagramId: 'ig_pro_demo_2', username: 'pro_demo_two' },
+    ],
+    contacts: [
+      {
+        name: 'Ahmed Hassan',
+        phoneNumber: '+971551112222',
+        leadSource: 'Google Ads',
+        pipelineStage: 'QUALIFIED',
+        city: 'Abu Dhabi',
+        initialMessage: 'Hello, I need help with my vehicle registration.',
+        responseMessage: 'Sure, I can help with that. Which vehicle type?',
+      },
+      {
+        name: 'Sarah Miller',
+        phoneNumber: '+971553334444',
+        leadSource: 'Instagram',
+        pipelineStage: 'NEW_LEAD',
+        city: 'Dubai',
+        initialMessage: 'Hi, what are your payment options?',
+        responseMessage: 'We accept card, transfer, and invoice-based billing for annual plans.',
+      },
+      {
+        name: 'Instagram User',
+        instagramId: 'ig_user_789',
+        instagramUsername: 'ig_user_789',
+        leadSource: 'Instagram DM',
+        pipelineStage: 'CONTACTED',
+        city: 'Abu Dhabi',
+        initialMessage: 'Hey! Saw your post about the new services.',
+        responseMessage: 'Glad you liked it! How can we help?',
+      },
+    ],
+    templates: [
+      { name: 'pro_welcome', content: 'Welcome to our Pro operations desk. How can we assist today?', category: 'UTILITY' },
+      { name: 'pro_payment_options', content: 'We accept Credit Card, Bank Transfer, and Apple Pay.', category: 'UTILITY' },
+      { name: 'pro_location_info', content: 'Our office is located in Business Bay, Dubai.', category: 'UTILITY' },
+    ],
+    sessionTemplates: [
+      { name: 'Quick Greeting', content: 'Hi there! How can I help you today?' },
+      { name: 'Closing Statement', content: 'Thank you for contacting us. Have a great day!' },
+      { name: 'Escalation Reply', content: 'I am escalating this to a senior agent and will update you shortly.' },
+    ],
+    ledgerCredit: 600,
+  },
+];
+
+async function resetDatabase() {
   await prisma.message.deleteMany();
   await prisma.conversationNote.deleteMany();
+  await prisma.activityLog.deleteMany();
+  await prisma.task.deleteMany();
   await prisma.conversation.deleteMany();
   await prisma.contactCustomAttributeValue.deleteMany();
   await prisma.customAttributeDefinition.deleteMany();
@@ -21,11 +180,13 @@ async function main() {
   await prisma.contact.deleteMany();
   await prisma.chatbotTool.deleteMany();
   await prisma.whatsAppNumber.deleteMany();
+  await prisma.instagramAccount.deleteMany();
   await prisma.chatbot.deleteMany();
   await prisma.whatsAppTemplate.deleteMany();
   await prisma.sessionTemplate.deleteMany();
   await prisma.broadcastRecipient.deleteMany();
   await prisma.broadcastCampaign.deleteMany();
+  await prisma.automationRule.deleteMany();
   await prisma.billingLedgerEntry.deleteMany();
   await prisma.usageLog.deleteMany();
   await prisma.apiKey.deleteMany();
@@ -36,234 +197,249 @@ async function main() {
   await prisma.widgetSetting.deleteMany();
   await prisma.featureRequest.deleteMany();
   await prisma.issueReport.deleteMany();
-  await prisma.instagramAccount.deleteMany();
   await prisma.workspace.deleteMany();
   await prisma.user.deleteMany();
+}
 
-  // Create Users
-  const user1 = await prisma.user.upsert({
-    where: { email: 'ameeneidha@gmail.com' },
-    update: {},
-    create: {
-      email: 'ameeneidha@gmail.com',
-      name: 'Ameen Eidha',
-      password: await bcrypt.hash('password123', 10),
-    },
-  });
-
-  const user2 = await prisma.user.upsert({
-    where: { email: 'team@example.com' },
-    update: {},
-    create: {
-      email: 'team@example.com',
-      name: 'Team Member',
-      password: await bcrypt.hash('password123', 10),
-    },
-  });
-
-  // Create Workspaces
-  const ws1 = await prisma.workspace.upsert({
-    where: { slug: 'main-business' },
-    update: {},
-    create: {
-      name: 'Main Business',
-      slug: 'main-business',
-      plan: 'PRO',
-      businessSettings: { create: { timezone: 'Asia/Dubai' } },
-      members: {
+async function createSuperadminUser(hashedPassword: string) {
+  await prisma.user.create({
+    data: {
+      email: SUPERADMIN_EMAIL,
+      name: SUPERADMIN_NAME,
+      password: hashedPassword,
+      emailVerified: true,
+      personalSettings: {
         create: {
-          userId: user1.id,
-          role: 'OWNER',
+          theme: 'light',
+        },
+      },
+    },
+  });
+}
+
+async function createDemoWorkspace(account: DemoAccount, hashedPassword: string) {
+  const owner = await prisma.user.create({
+    data: {
+      email: account.ownerEmail,
+      name: account.ownerName,
+      password: hashedPassword,
+      emailVerified: true,
+      personalSettings: {
+        create: {
+          theme: 'light',
         },
       },
     },
   });
 
-  const ws2 = await prisma.workspace.upsert({
-    where: { slug: 'marketing-agency' },
-    update: {},
-    create: {
-      name: 'Marketing Agency',
-      slug: 'marketing-agency',
-      businessSettings: { create: { timezone: 'Asia/Dubai' } },
+  const workspace = await prisma.workspace.create({
+    data: {
+      name: account.workspaceName,
+      slug: account.workspaceSlug,
+      plan: account.plan,
+      subscriptionStatus: 'active',
+      subscriptionCurrentPeriodEnd: renewalDate,
       members: {
         create: {
-          userId: user1.id,
+          userId: owner.id,
           role: 'OWNER',
+        },
+      },
+      businessSettings: {
+        create: {
+          timezone: 'Asia/Dubai',
+        },
+      },
+      widgetSetting: {
+        create: {
+          enabled: false,
         },
       },
     },
   });
 
-  // Add team member to ws1
-  await prisma.workspaceMembership.create({
-    data: {
-      userId: user2.id,
-      workspaceId: ws1.id,
-      role: 'USER',
-    },
-  });
+  const numbers = [];
+  for (const numberConfig of account.whatsappNumbers) {
+    const number = await prisma.whatsAppNumber.create({
+      data: {
+        ...numberConfig,
+        workspaceId: workspace.id,
+      },
+    });
+    numbers.push(number);
+  }
 
-  // Create WhatsApp Numbers
-  const num1 = await prisma.whatsAppNumber.create({
-    data: {
-      name: 'Meta Test Number',
-      phoneNumber: '+1 555 136 3768',
-      workspaceId: ws1.id,
-    },
-  });
+  const instagramAccounts = [];
+  for (const instagramConfig of account.instagramAccounts) {
+    const instagram = await prisma.instagramAccount.create({
+      data: {
+        ...instagramConfig,
+        accessToken: process.env.INSTAGRAM_ACCESS_TOKEN || undefined,
+        workspaceId: workspace.id,
+      },
+    });
+    instagramAccounts.push(instagram);
+  }
 
-  const num2 = await prisma.whatsAppNumber.create({
+  const chatbot = await prisma.chatbot.create({
     data: {
-      name: 'Sales Line',
-      phoneNumber: '+971507654321',
-      workspaceId: ws1.id,
-    },
-  });
-
-  // Create Instagram Accounts
-  const insta1 = await prisma.instagramAccount.create({
-    data: {
-      name: 'Instagram Business',
-      instagramId: instagramAccountId,
-      username: instagramUsername,
-      accessToken: instagramAccessToken,
-      workspaceId: ws1.id,
-    },
-  });
-
-  // Create AI Chatbot
-  const bot1 = await prisma.chatbot.create({
-    data: {
-      name: 'Assistant Bot',
-      instructions: 'You are a helpful assistant for a UAE-based business. Answer questions about services and escalate if needed.',
-      workspaceId: ws1.id,
+      name: `${account.plan} Assistant`,
+      instructions: `You are the ${account.plan} demo assistant. Help prospects, answer package questions, and escalate billing or onboarding issues clearly.`,
+      workspaceId: workspace.id,
       tools: {
         create: [
           { name: 'Escalate to Human Agent', description: 'Transfer the conversation to a human support agent.' },
         ],
       },
-      instagramAccounts: {
-        connect: { id: insta1.id },
+      instagramAccounts: instagramAccounts.length > 0
+        ? {
+            connect: instagramAccounts.map((instagram) => ({ id: instagram.id })),
+          }
+        : undefined,
+    },
+  });
+
+  if (numbers[0]) {
+    await prisma.whatsAppNumber.update({
+      where: { id: numbers[0].id },
+      data: {
+        chatbotId: chatbot.id,
+        autoReply: true,
       },
-    },
-  });
+    });
+  }
 
-  // Assign bot to number
-  await prisma.whatsAppNumber.update({
-    where: { id: num1.id },
-    data: { chatbotId: bot1.id, autoReply: true },
-  });
-
-  // Create Contacts
-  const contact1 = await prisma.contact.create({
-    data: {
-      name: 'Ahmed Hassan',
-      phoneNumber: '+971551112222',
-      city: 'Abu Dhabi',
-      workspaceId: ws1.id,
-      pipelineStage: 'QUALIFIED',
-    },
-  });
-
-  const contact2 = await prisma.contact.create({
-    data: {
-      name: 'Sarah Miller',
-      phoneNumber: '+971553334444',
-      city: 'Dubai',
-      workspaceId: ws1.id,
-      pipelineStage: 'NEW_LEAD',
-    },
-  });
-
-  // Create Conversations
-  const conv1 = await prisma.conversation.create({
-    data: {
-      contactId: contact1.id,
-      workspaceId: ws1.id,
-      numberId: num1.id,
-      channelType: 'WHATSAPP',
-      priority: 'HIGH',
-      assignedToId: user1.id,
-      tags: 'registration,high-value',
-      messages: {
-        create: [
-          { content: 'Hello, I need help with my vehicle registration.', direction: 'INCOMING', senderType: 'USER' },
-          { content: 'Sure, I can help with that. Which vehicle type?', direction: 'OUTGOING', senderType: 'AI_BOT' },
-          { content: 'This customer is a high-value lead. Please handle with care.', direction: 'OUTGOING', senderType: 'USER', isInternal: true, senderName: 'System' },
-        ],
+  for (const template of account.templates) {
+    await prisma.whatsAppTemplate.create({
+      data: {
+        ...template,
+        language: 'en',
+        workspaceId: workspace.id,
       },
-    },
-  });
+    });
+  }
 
-  const conv2 = await prisma.conversation.create({
-    data: {
-      contactId: contact2.id,
-      workspaceId: ws1.id,
-      numberId: num1.id,
-      channelType: 'WHATSAPP',
-      priority: 'MEDIUM',
-      assignedToId: user2.id,
-      tags: 'billing',
-      messages: {
-        create: [
-          { content: 'Hi, what are your payment options?', direction: 'INCOMING', senderType: 'USER' },
-        ],
+  for (const sessionTemplate of account.sessionTemplates) {
+    await prisma.sessionTemplate.create({
+      data: {
+        ...sessionTemplate,
+        workspaceId: workspace.id,
       },
-    },
-  });
+    });
+  }
 
-  // Create Instagram Conversation
-  const contact3 = await prisma.contact.create({
-    data: {
-      name: 'Instagram User',
-      instagramId: 'ig_user_789',
-      instagramUsername: 'ig_user_789',
-      city: 'Abu Dhabi',
-      workspaceId: ws1.id,
-    },
-  });
-
-  const conv3 = await prisma.conversation.create({
-    data: {
-      contactId: contact3.id,
-      workspaceId: ws1.id,
-      instagramAccountId: insta1.id,
-      channelType: 'INSTAGRAM',
-      messages: {
-        create: [
-          { content: 'Hey! Saw your post about the new services.', direction: 'INCOMING', senderType: 'USER' },
-          { content: 'Glad you liked it! How can we help?', direction: 'OUTGOING', senderType: 'USER' },
-        ],
+  for (const [index, contactConfig] of account.contacts.entries()) {
+    const contact = await prisma.contact.create({
+      data: {
+        name: contactConfig.name,
+        phoneNumber: contactConfig.phoneNumber,
+        instagramId: contactConfig.instagramId,
+        instagramUsername: contactConfig.instagramUsername,
+        city: contactConfig.city,
+        workspaceId: workspace.id,
+        pipelineStage: contactConfig.pipelineStage,
+        leadSource: contactConfig.leadSource,
       },
+    });
+
+    const conversation = await prisma.conversation.create({
+      data: {
+        contactId: contact.id,
+        workspaceId: workspace.id,
+        numberId: contactConfig.phoneNumber ? numbers[index % Math.max(numbers.length, 1)]?.id : undefined,
+        instagramAccountId: contactConfig.instagramId ? instagramAccounts[0]?.id : undefined,
+        channelType: contactConfig.instagramId ? 'INSTAGRAM' : 'WHATSAPP',
+        priority: account.plan === 'PRO' && index === 0 ? 'HIGH' : 'MEDIUM',
+        internalStatus: index === 0 ? 'WAITING_FOR_INTERNAL' : 'OPEN',
+        assignedToId: owner.id,
+        tags: `${account.plan.toLowerCase()},demo`,
+      },
+    });
+
+    await prisma.message.createMany({
+      data: [
+        {
+          conversationId: conversation.id,
+          content: contactConfig.initialMessage,
+          direction: 'INCOMING',
+          senderType: 'USER',
+        },
+        {
+          conversationId: conversation.id,
+          content: contactConfig.responseMessage,
+          direction: 'OUTGOING',
+          senderType: 'USER',
+          senderName: owner.name || account.ownerName,
+        },
+      ],
+    });
+
+    await prisma.task.create({
+      data: {
+        title: `Follow up with ${contactConfig.name}`,
+        priority: index === 0 ? 'HIGH' : 'MEDIUM',
+        contactId: contact.id,
+        conversationId: conversation.id,
+        workspaceId: workspace.id,
+      },
+    });
+
+    await prisma.activityLog.create({
+      data: {
+        type: 'TASK_CREATED',
+        content: `Seeded follow-up task for ${contactConfig.name}`,
+        contactId: contact.id,
+        conversationId: conversation.id,
+        workspaceId: workspace.id,
+      },
+    });
+  }
+
+  await prisma.automationRule.create({
+    data: {
+      name: `${account.plan} New Lead Routing`,
+      trigger: 'NEW_LEAD',
+      conditions: JSON.stringify({ source: 'any' }),
+      actions: JSON.stringify([{ type: 'AUTO_ASSIGN', value: owner.id }]),
+      enabled: true,
+      workspaceId: workspace.id,
     },
   });
 
-  // Create Templates
-  await prisma.whatsAppTemplate.createMany({
-    data: [
-      { name: 'welcome_message', content: 'Welcome to our service! How can we help you today?', category: 'UTILITY', language: 'en', workspaceId: ws1.id },
-      { name: 'payment_options', content: 'We accept Credit Card, Bank Transfer, and Apple Pay.', category: 'UTILITY', language: 'en', workspaceId: ws1.id },
-      { name: 'location_info', content: 'Our office is located in Business Bay, Dubai.', category: 'UTILITY', language: 'en', workspaceId: ws1.id },
-    ],
-  });
-
-  // Create Billing Data
   await prisma.billingLedgerEntry.create({
     data: {
-      amount: 500,
+      amount: account.ledgerCredit,
       type: 'CREDIT',
-      description: 'Initial balance',
-      workspaceId: ws1.id,
+      description: `${account.plan} demo balance`,
+      workspaceId: workspace.id,
     },
   });
+}
 
-  console.log('Seeding completed successfully.');
+async function main() {
+  console.log('Seeding database with package demo accounts...');
+  await resetDatabase();
+
+  const hashedPassword = await bcrypt.hash(DEFAULT_PASSWORD, 10);
+  await createSuperadminUser(hashedPassword);
+
+  for (const account of demoAccounts) {
+    await createDemoWorkspace(account, hashedPassword);
+  }
+
+  console.log('');
+  console.log('Demo accounts ready:');
+  console.log(`- SUPERADMIN: ${SUPERADMIN_EMAIL} / ${DEFAULT_PASSWORD}`);
+  for (const account of demoAccounts) {
+    console.log(`- ${account.plan}: ${account.ownerEmail} / ${DEFAULT_PASSWORD}`);
+  }
+  console.log('');
+  console.log(`All demo workspaces are verified and active until ${renewalDate.toISOString().slice(0, 10)}.`);
 }
 
 main()
-  .catch((e) => {
-    console.error(e);
+  .catch((error) => {
+    console.error(error);
     process.exit(1);
   })
   .finally(async () => {

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import axios from 'axios';
 import { useApp } from '../contexts/AppContext';
 import { 
@@ -10,7 +10,8 @@ import {
   Search,
   Filter,
   ArrowLeft,
-  ArrowRight
+  ArrowRight,
+  Check
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { motion } from 'motion/react';
@@ -22,6 +23,7 @@ interface Contact {
   name: string;
   phoneNumber?: string;
   pipelineStage: string;
+  estimatedValue?: number | null;
   conversations: any[];
 }
 
@@ -39,6 +41,13 @@ const STAGES = [
   { id: 'LOST', label: 'Lost', color: 'bg-red-500' },
 ];
 
+const formatAed = (value?: number | null) =>
+  new Intl.NumberFormat('en-AE', {
+    style: 'currency',
+    currency: 'AED',
+    maximumFractionDigits: 0,
+  }).format(value ?? 0);
+
 export default function CRM() {
   const { activeWorkspace } = useApp();
   const [contacts, setContacts] = useState<Contact[]>([]);
@@ -50,8 +59,15 @@ export default function CRM() {
     name: '',
     phoneNumber: '',
     listNames: [] as string[],
-    pipelineStage: 'NEW_LEAD'
+    pipelineStage: 'NEW_LEAD',
+    estimatedValue: ''
   });
+  const [valueDrafts, setValueDrafts] = useState<Record<string, string>>({});
+  const [savingValueId, setSavingValueId] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [showFilters, setShowFilters] = useState(false);
+  const [chatFilter, setChatFilter] = useState<'ALL' | 'ACTIVE' | 'NO_CHAT'>('ALL');
+  const [valueFilter, setValueFilter] = useState<'ALL' | 'WITH_VALUE' | 'NO_VALUE'>('ALL');
 
   useEffect(() => {
     if (activeWorkspace) {
@@ -85,6 +101,18 @@ export default function CRM() {
     }
   }, [activeWorkspace]);
 
+  useEffect(() => {
+    setValueDrafts((prev) => {
+      const next = { ...prev };
+      for (const contact of contacts) {
+        if (next[contact.id] === undefined) {
+          next[contact.id] = contact.estimatedValue ? String(contact.estimatedValue) : '';
+        }
+      }
+      return next;
+    });
+  }, [contacts]);
+
   const updateStage = async (contactId: string, newStage: string) => {
     try {
       await axios.patch(`/api/contacts/${contactId}`, { pipelineStage: newStage });
@@ -93,6 +121,33 @@ export default function CRM() {
     } catch (error) {
       console.error('Failed to update stage', error);
       toast.error('Could not move lead');
+    }
+  };
+
+  const saveEstimatedValue = async (contactId: string) => {
+    const rawValue = valueDrafts[contactId] ?? '';
+    const nextValue = rawValue.trim() ? Number(rawValue) : 0;
+
+    if (Number.isNaN(nextValue) || nextValue < 0) {
+      toast.error('Estimated value must be a valid amount');
+      return;
+    }
+
+    setSavingValueId(contactId);
+    try {
+      await axios.patch(`/api/contacts/${contactId}`, { estimatedValue: nextValue });
+      setContacts((prev) =>
+        prev.map((contact) =>
+          contact.id === contactId ? { ...contact, estimatedValue: nextValue } : contact
+        )
+      );
+      setValueDrafts((prev) => ({ ...prev, [contactId]: nextValue > 0 ? String(nextValue) : '' }));
+      toast.success('Deal value updated');
+    } catch (error) {
+      console.error('Failed to update estimated value', error);
+      toast.error('Could not update deal value');
+    } finally {
+      setSavingValueId(null);
     }
   };
 
@@ -108,9 +163,10 @@ export default function CRM() {
         phoneNumber: newLead.phoneNumber,
         listNames: newLead.listNames,
         pipelineStage: newLead.pipelineStage,
+        estimatedValue: newLead.estimatedValue.trim() ? Number(newLead.estimatedValue) : undefined,
       });
       setContacts(prev => [res.data, ...prev]);
-      setNewLead({ name: '', phoneNumber: '', listNames: [], pipelineStage: 'NEW_LEAD' });
+      setNewLead({ name: '', phoneNumber: '', listNames: [], pipelineStage: 'NEW_LEAD', estimatedValue: '' });
       await fetchLists();
       setShowAddLead(false);
       toast.success('Lead saved');
@@ -126,6 +182,35 @@ export default function CRM() {
     }
   };
 
+  const filteredContacts = useMemo(() => {
+    const normalizedQuery = searchQuery.trim().toLowerCase();
+
+    return contacts.filter((contact) => {
+      const matchesSearch =
+        !normalizedQuery ||
+        contact.name?.toLowerCase().includes(normalizedQuery) ||
+        contact.phoneNumber?.toLowerCase().includes(normalizedQuery) ||
+        STAGES.find((stage) => stage.id === contact.pipelineStage)?.label.toLowerCase().includes(normalizedQuery);
+
+      const hasChat = Boolean(contact.conversations?.[0]);
+      const matchesChat =
+        chatFilter === 'ALL' ||
+        (chatFilter === 'ACTIVE' && hasChat) ||
+        (chatFilter === 'NO_CHAT' && !hasChat);
+
+      const hasValue = Number(contact.estimatedValue || 0) > 0;
+      const matchesValue =
+        valueFilter === 'ALL' ||
+        (valueFilter === 'WITH_VALUE' && hasValue) ||
+        (valueFilter === 'NO_VALUE' && !hasValue);
+
+      return matchesSearch && matchesChat && matchesValue;
+    });
+  }, [chatFilter, contacts, searchQuery, valueFilter]);
+
+  const hasActiveFilters =
+    searchQuery.trim().length > 0 || chatFilter !== 'ALL' || valueFilter !== 'ALL';
+
   if (isLoading) {
     return (
       <div className="h-full flex items-center justify-center">
@@ -140,8 +225,10 @@ export default function CRM() {
         <div className="flex items-center gap-4">
           <h1 className="text-lg font-bold text-gray-900 dark:text-white">CRM Pipeline</h1>
           <div className="flex items-center gap-2 px-3 py-1 bg-gray-50 dark:bg-slate-800 rounded-full border border-gray-100 dark:border-slate-700">
-            <span className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Total Leads:</span>
-            <span className="text-xs font-bold text-[#25D366]">{contacts.length}</span>
+            <span className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wider">
+              {hasActiveFilters ? 'Matching Leads:' : 'Total Leads:'}
+            </span>
+            <span className="text-xs font-bold text-[#25D366]">{filteredContacts.length}</span>
           </div>
         </div>
         <div className="flex items-center gap-3">
@@ -150,12 +237,101 @@ export default function CRM() {
             <input 
               type="text" 
               placeholder="Search leads..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
               className="pl-9 pr-4 py-2 bg-gray-50 dark:bg-slate-800 border-none rounded-xl text-sm focus:ring-2 focus:ring-[#25D366]/20 dark:focus:ring-[#25D366]/10 text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-600 transition-all w-64"
             />
           </div>
-          <button className="p-2 hover:bg-gray-50 dark:hover:bg-slate-800 rounded-xl text-gray-400 border border-gray-100 dark:border-slate-800 transition-colors">
-            <Filter className="w-4 h-4" />
-          </button>
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setShowFilters((prev) => !prev)}
+              className={cn(
+                'p-2 rounded-xl border transition-colors',
+                hasActiveFilters
+                  ? 'border-[#25D366]/30 bg-[#25D366]/10 text-[#128C7E] dark:text-[#4ADE80]'
+                  : 'text-gray-400 border-gray-100 dark:border-slate-800 hover:bg-gray-50 dark:hover:bg-slate-800'
+              )}
+            >
+              <Filter className="w-4 h-4" />
+            </button>
+            {showFilters && (
+              <div className="absolute right-0 top-12 z-10 w-72 rounded-2xl border border-gray-100 bg-white p-4 shadow-xl dark:border-slate-700 dark:bg-slate-900">
+                <div className="mb-4">
+                  <p className="text-xs font-bold uppercase tracking-widest text-gray-400 dark:text-gray-500">
+                    Conversation
+                  </p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {[
+                      { id: 'ALL', label: 'All chats' },
+                      { id: 'ACTIVE', label: 'Active chat' },
+                      { id: 'NO_CHAT', label: 'No chat' },
+                    ].map((option) => (
+                      <button
+                        key={option.id}
+                        type="button"
+                        onClick={() => setChatFilter(option.id as typeof chatFilter)}
+                        className={cn(
+                          'rounded-full px-3 py-1.5 text-xs font-semibold transition-colors',
+                          chatFilter === option.id
+                            ? 'bg-[#25D366] text-white'
+                            : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-slate-800 dark:text-gray-300'
+                        )}
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="mb-4">
+                  <p className="text-xs font-bold uppercase tracking-widest text-gray-400 dark:text-gray-500">
+                    Deal value
+                  </p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {[
+                      { id: 'ALL', label: 'All values' },
+                      { id: 'WITH_VALUE', label: 'With value' },
+                      { id: 'NO_VALUE', label: 'No value' },
+                    ].map((option) => (
+                      <button
+                        key={option.id}
+                        type="button"
+                        onClick={() => setValueFilter(option.id as typeof valueFilter)}
+                        className={cn(
+                          'rounded-full px-3 py-1.5 text-xs font-semibold transition-colors',
+                          valueFilter === option.id
+                            ? 'bg-[#25D366] text-white'
+                            : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-slate-800 dark:text-gray-300'
+                        )}
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="flex items-center justify-between">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSearchQuery('');
+                      setChatFilter('ALL');
+                      setValueFilter('ALL');
+                    }}
+                    className="text-sm font-semibold text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+                  >
+                    Clear filters
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowFilters(false)}
+                    className="rounded-xl bg-[#25D366] px-3 py-2 text-xs font-bold text-white transition-colors hover:bg-[#128C7E]"
+                  >
+                    Apply
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
           <button
             onClick={() => {
               fetchLists();
@@ -192,6 +368,15 @@ export default function CRM() {
                 placeholder="Phone number"
                 value={newLead.phoneNumber}
                 onChange={(e) => setNewLead(prev => ({ ...prev, phoneNumber: e.target.value }))}
+                className="w-full rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-900 outline-none focus:border-[#25D366] focus:ring-2 focus:ring-[#25D366]/20 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+              />
+              <input
+                type="number"
+                min="0"
+                step="1"
+                placeholder="Estimated value (AED)"
+                value={newLead.estimatedValue}
+                onChange={(e) => setNewLead(prev => ({ ...prev, estimatedValue: e.target.value }))}
                 className="w-full rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-900 outline-none focus:border-[#25D366] focus:ring-2 focus:ring-[#25D366]/20 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
               />
               <ContactListPicker
@@ -240,7 +425,7 @@ export default function CRM() {
                   <div className={cn("w-2 h-2 rounded-full", stage.color)} />
                   <h3 className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-widest">{stage.label}</h3>
                   <span className="text-[10px] font-bold text-gray-400 dark:text-gray-500 bg-gray-100 dark:bg-slate-800 px-1.5 py-0.5 rounded transition-colors">
-                    {contacts.filter(c => c.pipelineStage === stage.id).length}
+                    {filteredContacts.filter(c => c.pipelineStage === stage.id).length}
                   </span>
                 </div>
                 <button className="text-gray-300 hover:text-gray-500">
@@ -249,7 +434,7 @@ export default function CRM() {
               </div>
 
               <div className="flex-1 bg-gray-100/50 dark:bg-slate-900/50 rounded-2xl p-3 space-y-3 overflow-y-auto border border-dashed border-gray-200 dark:border-slate-800 transition-colors">
-                {contacts
+                {filteredContacts
                   .filter(c => c.pipelineStage === stage.id)
                   .map((contact) => (
                     <motion.div
@@ -300,6 +485,54 @@ export default function CRM() {
                         <Phone className="w-3 h-3" />
                         {contact.phoneNumber}
                       </div>
+                      <div className="mb-3 rounded-2xl border border-gray-100 bg-gray-50/80 p-2.5 dark:border-slate-700 dark:bg-slate-900/70">
+                        <div className="mb-1 flex items-center justify-between">
+                          <span className="text-[10px] font-bold uppercase tracking-widest text-gray-400 dark:text-gray-500">
+                            Deal Value
+                          </span>
+                          {(contact.estimatedValue ?? 0) > 0 && (
+                            <span className="text-[10px] font-bold text-[#128C7E] dark:text-[#4ADE80]">
+                              {formatAed(contact.estimatedValue)}
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="number"
+                            min="0"
+                            step="1"
+                            value={valueDrafts[contact.id] ?? ''}
+                            onChange={(e) =>
+                              setValueDrafts((prev) => ({ ...prev, [contact.id]: e.target.value }))
+                            }
+                            onClick={(e) => e.stopPropagation()}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault();
+                                void saveEstimatedValue(contact.id);
+                              }
+                            }}
+                            placeholder="0"
+                            className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-900 outline-none focus:border-[#25D366] focus:ring-2 focus:ring-[#25D366]/20 dark:border-slate-600 dark:bg-slate-800 dark:text-white"
+                          />
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              void saveEstimatedValue(contact.id);
+                            }}
+                            disabled={savingValueId === contact.id}
+                            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#25D366] text-white transition-colors hover:bg-[#128C7E] disabled:opacity-60"
+                            title="Save deal value"
+                          >
+                            {savingValueId === contact.id ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Check className="h-4 w-4" />
+                            )}
+                          </button>
+                        </div>
+                      </div>
                       <div className="pt-3 border-t border-gray-50 dark:border-slate-700 flex items-center justify-between">
                         <div className="flex -space-x-1">
                           <div className="w-5 h-5 rounded-full bg-gray-100 dark:bg-slate-700 border border-white dark:border-slate-800 flex items-center justify-center text-[8px] font-bold text-gray-400">
@@ -315,9 +548,11 @@ export default function CRM() {
                       })()}
                     </motion.div>
                   ))}
-                {contacts.filter(c => c.pipelineStage === stage.id).length === 0 && (
+                {filteredContacts.filter(c => c.pipelineStage === stage.id).length === 0 && (
                   <div className="h-32 flex flex-col items-center justify-center text-center p-4 border-2 border-dashed border-gray-200 dark:border-slate-800 rounded-xl">
-                    <p className="text-[10px] font-medium text-gray-400 dark:text-gray-600 uppercase tracking-tighter">No leads here</p>
+                    <p className="text-[10px] font-medium text-gray-400 dark:text-gray-600 uppercase tracking-tighter">
+                      {hasActiveFilters ? 'No matching leads' : 'No leads here'}
+                    </p>
                   </div>
                 )}
               </div>

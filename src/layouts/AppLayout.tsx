@@ -7,7 +7,7 @@ import { useState } from 'react';
 export default function AppLayout() {
   const location = useLocation();
   const navigate = useNavigate();
-  const { user, isLoading, verifyEmail, hasVerifiedEmail, hasActiveSubscription, hasFullAccess } = useApp();
+  const { user, isLoading, verifyEmail, hasVerifiedEmail, hasActiveSubscription, hasFullAccess, isSuperadmin } = useApp();
   const [isVerifying, setIsVerifying] = useState(false);
 
   if (isLoading) {
@@ -22,10 +22,18 @@ export default function AppLayout() {
     return <Navigate to="/login" replace />;
   }
 
+  if (isSuperadmin && !location.pathname.startsWith('/app/superadmin')) {
+    return <Navigate to="/app/superadmin" replace />;
+  }
+
+  if (!isSuperadmin && location.pathname.startsWith('/app/superadmin')) {
+    return <Navigate to="/app/dashboard" replace />;
+  }
+
   const isBillingRoute = location.pathname.startsWith('/app/settings/billing');
   const isInboxRoute = location.pathname.startsWith('/app/inbox');
 
-  if (!hasFullAccess && !isBillingRoute && !isInboxRoute) {
+  if (!isSuperadmin && !hasFullAccess && !isBillingRoute && !isInboxRoute) {
     return <Navigate to="/app/inbox" replace />;
   }
 
@@ -44,7 +52,7 @@ export default function AppLayout() {
     <div className="flex h-screen bg-[#F8F9FA] dark:bg-slate-950 overflow-hidden transition-colors">
       <Sidebar />
       <main className="flex-1 overflow-hidden relative flex flex-col">
-        {!hasVerifiedEmail && (
+        {!isSuperadmin && !hasVerifiedEmail && (
           <div className="bg-amber-50 dark:bg-amber-900/20 border-b border-amber-100 dark:border-amber-900/30 px-4 py-2 flex items-center justify-between">
             <div className="flex items-center gap-2 text-amber-700 dark:text-amber-400 text-sm font-medium">
               <AlertCircle className="w-4 h-4" />
@@ -60,7 +68,7 @@ export default function AppLayout() {
             </button>
           </div>
         )}
-        {hasVerifiedEmail && !hasActiveSubscription && (
+        {!isSuperadmin && hasVerifiedEmail && !hasActiveSubscription && (
           <div className="bg-blue-50 border-b border-blue-100 px-4 py-2 flex items-center justify-between">
             <div className="flex items-center gap-2 text-blue-700 text-sm font-medium">
               <Lock className="w-4 h-4" />

@@ -92,7 +92,37 @@ const DASHBOARD_STAGE_LABELS: Record<string, string> = {
   LOST: 'Lost',
 };
 
+const JWT_SECRET = (() => {
+  const value = (process.env.JWT_SECRET || '').trim();
+  if (!value || value === 'your-secret-key-here' || value.length < 32) {
+    throw new Error('FATAL: JWT_SECRET env var is missing, defaulted, or too short (minimum 32 characters).');
+  }
+  return value;
+})();
+
+const ALLOWED_ORIGINS = Array.from(
+  new Set(
+    [process.env.ALLOWED_ORIGINS || '', process.env.APP_URL || 'http://localhost:3000,http://127.0.0.1:3000']
+      .flatMap((value) => value.split(','))
+      .map((value) => value.trim())
+      .filter(Boolean)
+      .map((value) => {
+        try {
+          return new URL(value).origin;
+        } catch {
+          return value;
+        }
+      })
+  )
+);
+
+const AUTH_RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
+const AUTH_RATE_LIMIT_MAX = 10;
+const authRateLimitStore = new Map<string, { count: number; resetAt: number }>();
+
 const getWorkspaceUserLimit = (plan?: string | null) => WORKSPACE_USER_LIMITS[(plan || '').toUpperCase()] || 1;
+const getWorkspacePlanLimits = (plan?: string | null) =>
+  WORKSPACE_PLAN_LIMITS[(plan || '').toUpperCase()] || WORKSPACE_PLAN_LIMITS.STARTER;
 
 const deriveNameFromEmail = (email?: string | null) => {
   const localPart = (email || '').split('@')[0]?.trim();
@@ -123,6 +153,27 @@ const createPasswordResetToken = () => {
 
 const hashPasswordResetToken = (token: string) =>
   crypto.createHash('sha256').update(token).digest('hex');
+
+const sanitizeUser = (user: any) => {
+  if (!user) return user;
+  const {
+    password,
+    passwordResetTokenHash,
+    passwordResetExpiresAt,
+    ...safeUser
+  } = user;
+  return safeUser;
+};
+
+const sanitizeMembership = (membership: any) => {
+  if (!membership) return membership;
+  return {
+    ...membership,
+    user: sanitizeUser(membership.user),
+  };
+};
+
+const SUPERADMIN_EMAIL = 'ameeneidha@gmail.com';
 
 type WhatsAppMediaKind = 'image' | 'document' | 'audio';
 type IncomingWhatsAppMessagePayload =
@@ -1457,8 +1508,14 @@ async function startServer() {
   const httpServer = createServer(app);
   const io = new Server(httpServer, {
     cors: {
-      origin: "*",
-      methods: ["GET", "POST"]
+      origin: (origin, callback) => {
+        if (!origin || ALLOWED_ORIGINS.includes(origin)) {
+          return callback(null, true);
+        }
+        callback(new Error("Not allowed by CORS"));
+      },
+      methods: ["GET", "POST"],
+      credentials: true,
     }
   });
   const PORT = Number(process.env.PORT) || 3000;
@@ -1587,8 +1644,6 @@ async function startServer() {
     const challenge = req.query["hub.challenge"];
     const expectedToken = (process.env.META_VERIFY_TOKEN || "").trim();
 
-    console.log("Meta Verification Request:", { mode, token, expectedToken });
-
     if (mode === "subscribe" && String(token).trim() === expectedToken) {
       console.log("Meta Webhook Verified Successfully!");
       // Meta requires the challenge to be returned exactly as received in the response body
@@ -1596,14 +1651,15 @@ async function startServer() {
       return res.status(200).send(challenge);
     }
     
-    console.error("Meta Webhook Verification Failed: Token Mismatch", { 
-      received: token, 
-      expected: expectedToken 
-    });
+    console.error("Meta Webhook Verification Failed");
     return res.status(403).send("Verification failed");
   });
 
-  app.use(express.json());
+  app.use(express.json({
+    verify: (req: any, _res, buf) => {
+      req.rawBody = buf?.length ? buf.toString('utf8') : '';
+    }
+  }));
 
   const requireAuth = (req: any, res: any, next: any) => {
     const authHeader = req.headers.authorization;
@@ -1612,12 +1668,33 @@ async function startServer() {
     }
     try {
       const token = authHeader.split(' ')[1];
-      const decoded = jwt.verify(token, process.env.JWT_SECRET || 'fallback-secret');
+      const decoded = jwt.verify(token, JWT_SECRET);
       req.user = decoded;
       next();
     } catch {
       return res.status(401).json({ error: 'Invalid token' });
     }
+  };
+
+  const authRateLimiter = (label: string) => (req: any, res: any, next: any) => {
+    const now = Date.now();
+    const key = `${label}:${req.ip || req.headers['x-forwarded-for'] || 'unknown'}`;
+    const current = authRateLimitStore.get(key);
+
+    if (!current || current.resetAt <= now) {
+      authRateLimitStore.set(key, { count: 1, resetAt: now + AUTH_RATE_LIMIT_WINDOW_MS });
+      return next();
+    }
+
+    if (current.count >= AUTH_RATE_LIMIT_MAX) {
+      const retryAfterSeconds = Math.max(1, Math.ceil((current.resetAt - now) / 1000));
+      res.setHeader('Retry-After', String(retryAfterSeconds));
+      return res.status(429).json({ error: 'Too many attempts. Please try again later.' });
+    }
+
+    current.count += 1;
+    authRateLimitStore.set(key, current);
+    next();
   };
 
   const getUserByToken = async (req: any) => {
@@ -1642,11 +1719,47 @@ async function startServer() {
     next();
   };
 
+  const requireWorkspaceAccessFromQuery = async (req: any, res: any, next: any) =>
+    requireWorkspaceAccessById(req, res, next, String(req.query.workspaceId || '').trim() || null);
+
+  const requireConversationAccess = async (req: any, res: any, next: any) => {
+    const conversationId = String(req.params.id || req.body.conversationId || '').trim();
+    if (!conversationId) {
+      return res.status(400).json({ error: 'Conversation is required' });
+    }
+    const conversation = await prisma.conversation.findUnique({
+      where: { id: conversationId },
+      select: { workspaceId: true }
+    });
+    return requireWorkspaceAccessById(req, res, next, conversation?.workspaceId);
+  };
+
+  const requireContactAccess = async (req: any, res: any, next: any) => {
+    const contactId = String(req.params.id || req.body.contactId || '').trim();
+    if (!contactId) {
+      return res.status(400).json({ error: 'Contact is required' });
+    }
+    const contact = await prisma.contact.findUnique({
+      where: { id: contactId },
+      select: { workspaceId: true }
+    });
+    return requireWorkspaceAccessById(req, res, next, contact?.workspaceId);
+  };
+
   const requireVerifiedEmail = async (req: any, res: any, next: any) => {
     const user = await getUserByToken(req);
     if (!user?.emailVerified) {
       return res.status(403).json({ error: 'Verify your email before continuing' });
     }
+    next();
+  };
+
+  const requireSuperadmin = async (req: any, res: any, next: any) => {
+    const user = await getUserByToken(req);
+    if (!user || String(user.email || '').toLowerCase() !== SUPERADMIN_EMAIL) {
+      return res.status(403).json({ error: 'Superadmin access required' });
+    }
+    req.superadminUser = user;
     next();
   };
 
@@ -1691,6 +1804,81 @@ async function startServer() {
   const requireSubscribedTask = async (req: any, res: any, next: any) => {
     const task = await prisma.task.findUnique({ where: { id: req.params.id } });
     return requireSubscribedWorkspaceById(req, res, next, task?.workspaceId);
+  };
+
+  const enforceWorkspacePlanLimit = async (
+    res: any,
+    workspaceId: string,
+    resource: 'whatsapp' | 'instagram' | 'chatbots' | 'contacts' | 'broadcasts' | 'automations',
+    pendingAdds = 1
+  ) => {
+    if (pendingAdds <= 0) {
+      return true;
+    }
+
+    const workspace = await prisma.workspace.findUnique({
+      where: { id: workspaceId },
+      select: { id: true, plan: true }
+    });
+
+    if (!workspace) {
+      res.status(404).json({ error: 'Workspace not found' });
+      return false;
+    }
+
+    const limits = getWorkspacePlanLimits(workspace.plan);
+    const currentCount =
+      resource === 'whatsapp'
+        ? await prisma.whatsAppNumber.count({ where: { workspaceId } })
+        : resource === 'instagram'
+          ? await prisma.instagramAccount.count({ where: { workspaceId } })
+          : resource === 'chatbots'
+            ? await prisma.chatbot.count({ where: { workspaceId } })
+            : resource === 'broadcasts'
+              ? await prisma.broadcastCampaign.count({ where: { workspaceId } })
+              : resource === 'automations'
+                ? await prisma.automationRule.count({ where: { workspaceId } })
+                : await prisma.contact.count({ where: { workspaceId } });
+
+    const limit = limits[resource];
+    if (currentCount + pendingAdds > limit) {
+      const resourceLabel =
+        resource === 'whatsapp'
+          ? 'WhatsApp numbers'
+          : resource === 'instagram'
+            ? 'Instagram accounts'
+            : resource === 'chatbots'
+              ? 'AI chatbots'
+              : resource === 'broadcasts'
+                ? 'broadcasts'
+                : resource === 'automations'
+                  ? 'automation rules'
+                  : 'contacts';
+
+      res.status(403).json({
+        error: `Plan limit reached: ${limit} ${resourceLabel} allowed on ${workspace.plan} plan`
+      });
+      return false;
+    }
+
+    return true;
+  };
+
+  const verifyMetaSignature = (req: any) => {
+    const signature = String(req.headers['x-hub-signature-256'] || '').trim();
+    const appSecret = String(process.env.META_APP_SECRET || '').trim();
+    const rawBody = String(req.rawBody || '');
+
+    if (!signature || !appSecret || !rawBody) {
+      return false;
+    }
+
+    const expected = `sha256=${crypto.createHmac('sha256', appSecret).update(rawBody).digest('hex')}`;
+    if (signature.length !== expected.length) {
+      return false;
+    }
+
+    return crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected));
   };
 
   const resolveContactListIds = async (workspaceId: string, listIds?: string[], listNames?: string[]) => {
@@ -1979,6 +2167,11 @@ async function startServer() {
     const nextName = String(name || verifiedName || businessName || normalizedDisplayPhone).trim() || normalizedDisplayPhone;
     const nextTokenExpiresAt = tokenExpiresAt ? new Date(tokenExpiresAt) : null;
     const movingAcrossWorkspaces = Boolean(existing && existing.workspaceId !== normalizedWorkspaceId);
+    const needsCapacity = !existing || movingAcrossWorkspaces;
+
+    if (!(await enforceWorkspacePlanLimit(res, normalizedWorkspaceId, 'whatsapp', needsCapacity ? 1 : 0))) {
+      return;
+    }
 
     const data = {
       name: nextName,
@@ -2163,9 +2356,16 @@ async function startServer() {
     }
   });
 
-  app.post("/webhook/meta", async (req, res) => {
+  app.post("/webhook/meta", async (req: any, res) => {
+    if (!verifyMetaSignature(req)) {
+      return res.status(403).send("Forbidden");
+    }
+
     const body = req.body;
-    console.log("Meta Webhook received:", JSON.stringify(body, null, 2));
+    console.log("Meta Webhook received", {
+      object: body?.object,
+      entryCount: Array.isArray(body?.entry) ? body.entry.length : 0,
+    });
 
     // Process incoming messages from WhatsApp
     if (body.object === "whatsapp_business_account") {
@@ -2523,7 +2723,7 @@ async function startServer() {
   });
 
   // Auth Mock (For demo purposes)
-  app.post("/api/auth/register", async (req, res) => {
+  app.post("/api/auth/register", authRateLimiter('register'), async (req, res) => {
     const { name, email, password } = req.body;
     if (!name || !email || !password) {
       return res.status(400).json({ error: "Missing name, email or password" });
@@ -2564,13 +2764,14 @@ async function startServer() {
 
       const token = jwt.sign(
         { userId: user.id, email: user.email },
-        process.env.JWT_SECRET || 'fallback-secret',
+        JWT_SECRET,
         { expiresIn: '7d' }
       );
 
-      res.json({ token, user });
+      res.json({ token, user: sanitizeUser(user) });
     } catch (e: any) {
-      res.status(500).json({ error: e.message });
+      console.error('[auth:register]', e);
+      res.status(500).json({ error: 'Registration failed' });
     }
   });
 
@@ -2580,21 +2781,20 @@ async function startServer() {
         where: { id: (req as any).user.userId },
         data: { emailVerified: true }
       });
-      res.json({ success: true, user });
+      res.json({ success: true, user: sanitizeUser(user) });
     } catch (e: any) {
-      res.status(500).json({ error: e.message });
+      console.error('[auth:verify-email]', e);
+      res.status(500).json({ error: 'Could not verify email' });
     }
   });
 
-  app.post("/api/auth/forgot-password", async (req, res) => {
+  app.post("/api/auth/forgot-password", authRateLimiter('forgot-password'), async (req, res) => {
     const email = String(req.body?.email || '').trim().toLowerCase();
     if (!email) {
       return res.status(400).json({ error: "Email is required" });
     }
 
     const user = await prisma.user.findUnique({ where: { email } });
-    let resetUrl: string | null = null;
-
     if (user?.id) {
       const { token, tokenHash } = createPasswordResetToken();
       const expiresAt = new Date(Date.now() + 60 * 60 * 1000);
@@ -2608,14 +2808,15 @@ async function startServer() {
       });
 
       const appBaseUrl = (process.env.APP_URL || req.headers.origin || `${req.protocol}://${req.get('host')}`).replace(/\/$/, '');
-      resetUrl = `${appBaseUrl}/reset-password?token=${token}`;
-      console.log(`Password reset requested for ${email}. Reset URL: ${resetUrl}`);
+      const resetUrl = `${appBaseUrl}/reset-password?token=${token}`;
+      console.log(`[AUTH] Password reset requested for ${email} at ${new Date().toISOString()}`);
+      // TODO: send resetUrl via email provider. Do not expose or log tokens in responses.
+      void resetUrl;
     }
 
     res.json({
       success: true,
       message: "If the account exists, a reset link is ready.",
-      resetUrl,
     });
   });
 
@@ -2643,7 +2844,7 @@ async function startServer() {
     res.json({ success: true });
   });
 
-  app.post("/api/auth/reset-password", async (req, res) => {
+  app.post("/api/auth/reset-password", authRateLimiter('reset-password'), async (req, res) => {
     const token = String(req.body?.token || '').trim();
     const password = String(req.body?.password || '');
 
@@ -2682,7 +2883,7 @@ async function startServer() {
     res.json({ success: true });
   });
 
-  app.post("/api/auth/login", async (req, res) => {
+  app.post("/api/auth/login", authRateLimiter('login'), async (req, res) => {
     const { email, password } = req.body;
     const user = await prisma.user.findUnique({
       where: { email },
@@ -2693,34 +2894,59 @@ async function startServer() {
     }
     const token = jwt.sign(
       { userId: user.id, email: user.email },
-      process.env.JWT_SECRET || 'fallback-secret',
+      JWT_SECRET,
       { expiresIn: '7d' }
     );
-    res.json({ token, user });
+    res.json({ token, user: sanitizeUser(user) });
   });
 
-  app.get("/api/users/:id", requireAuth, async (req, res) => {
+  app.get("/api/users/:id", requireAuth, async (req: any, res) => {
+    if (req.user.userId !== req.params.id) {
+      const sharedWorkspace = await prisma.workspaceMembership.findFirst({
+        where: {
+          userId: req.params.id,
+          workspace: {
+            members: {
+              some: {
+                userId: req.user.userId,
+              }
+            }
+          }
+        }
+      });
+
+      if (!sharedWorkspace) {
+        return res.status(403).json({ error: "Access denied" });
+      }
+    }
+
     const user = await prisma.user.findUnique({
-      where: { id: req.params.id }
+      where: { id: req.params.id },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        image: true,
+        emailVerified: true,
+      }
     });
     if (user) res.json(user);
     else res.status(404).json({ error: "User not found" });
   });
 
   // Workspace Routes
-  app.get("/api/workspaces", requireAuth, async (req, res) => {
-    const { userId } = req.query;
+  app.get("/api/workspaces", requireAuth, async (req: any, res) => {
     const memberships = await prisma.workspaceMembership.findMany({
-      where: { userId: userId as string },
+      where: { userId: req.user.userId },
       include: { workspace: true }
     });
     res.json(memberships.map(m => m.workspace));
   });
 
-  app.post("/api/workspaces", requireAuth, requireSubscribedWorkspaceFromBody, async (req, res) => {
-    const { name, userId } = req.body;
-    console.log('Creating workspace for user:', userId, 'name:', name);
-    if (!name || !userId) return res.status(400).json({ error: "Missing name or userId" });
+  app.post("/api/workspaces", requireAuth, requireVerifiedEmail, async (req: any, res) => {
+    const { name } = req.body;
+    const userId = req.user.userId;
+    if (!name) return res.status(400).json({ error: "Workspace name is required" });
 
     let slug = name.toLowerCase().trim().replace(/ /g, '-').replace(/[^\w-]+/g, '');
     if (!slug) slug = 'workspace';
@@ -2764,17 +2990,8 @@ async function startServer() {
 
       res.json(workspace);
     } catch (e: any) {
-      console.error('Detailed Workspace creation error:', {
-        message: e.message,
-        code: e.code,
-        meta: e.meta,
-        stack: e.stack
-      });
-      res.status(500).json({ 
-        error: "Failed to create workspace", 
-        details: e.message,
-        code: e.code 
-      });
+      console.error('[workspace:create]', e);
+      res.status(500).json({ error: "Unable to create workspace. Please try again." });
     }
   });
 
@@ -2826,7 +3043,7 @@ async function startServer() {
   })));
 
   // Inbox Routes
-  app.get("/api/conversations", requireAuth, async (req, res) => {
+  app.get("/api/conversations", requireAuth, requireWorkspaceAccessFromQuery, async (req, res) => {
     const { workspaceId } = req.query;
     const conversations = await prisma.conversation.findMany({
       where: { workspaceId: workspaceId as string },
@@ -2856,7 +3073,7 @@ async function startServer() {
     res.json(conversations);
   });
 
-  app.get("/api/conversations/:id", requireAuth, async (req, res) => {
+  app.get("/api/conversations/:id", requireAuth, requireConversationAccess, async (req, res) => {
     await prisma.message.updateMany({
       where: {
         conversationId: req.params.id,
@@ -3294,7 +3511,7 @@ async function startServer() {
   });
 
   // Templates
-  app.get("/api/templates/whatsapp", requireAuth, async (req, res) => {
+  app.get("/api/templates/whatsapp", requireAuth, requireWorkspaceAccessFromQuery, async (req, res) => {
     const { workspaceId } = req.query;
     const templates = await prisma.whatsAppTemplate.findMany({
       where: { workspaceId: workspaceId as string }
@@ -3303,7 +3520,7 @@ async function startServer() {
   });
 
   // Numbers
-  app.get("/api/numbers", requireAuth, async (req, res) => {
+  app.get("/api/numbers", requireAuth, requireWorkspaceAccessFromQuery, async (req, res) => {
     const { workspaceId } = req.query;
     const numbers = await prisma.whatsAppNumber.findMany({
       where: { workspaceId: workspaceId as string },
@@ -3313,7 +3530,7 @@ async function startServer() {
   });
 
   // Instagram Accounts
-  app.get("/api/instagram/accounts", requireAuth, async (req, res) => {
+  app.get("/api/instagram/accounts", requireAuth, requireWorkspaceAccessFromQuery, async (req, res) => {
     const { workspaceId } = req.query;
     const accounts = await prisma.instagramAccount.findMany({
       where: { workspaceId: workspaceId as string },
@@ -3324,6 +3541,9 @@ async function startServer() {
 
   app.post("/api/instagram/accounts", requireAuth, requireSubscribedWorkspaceFromBody, async (req, res) => {
     const { workspaceId, name, instagramId, username } = req.body;
+    if (!(await enforceWorkspacePlanLimit(res, workspaceId, 'instagram'))) {
+      return;
+    }
     const account = await prisma.instagramAccount.create({
       data: {
         workspaceId,
@@ -3337,7 +3557,7 @@ async function startServer() {
   });
 
   // Chatbots
-  app.get("/api/chatbots", requireAuth, async (req, res) => {
+  app.get("/api/chatbots", requireAuth, requireWorkspaceAccessFromQuery, async (req, res) => {
     const { workspaceId } = req.query;
     const chatbots = await prisma.chatbot.findMany({
       where: { workspaceId: workspaceId as string },
@@ -3348,6 +3568,9 @@ async function startServer() {
 
   app.post("/api/chatbots", requireAuth, requireSubscribedWorkspaceFromBody, async (req, res) => {
     const { workspaceId, name, instructions } = req.body;
+    if (!(await enforceWorkspacePlanLimit(res, workspaceId, 'chatbots'))) {
+      return;
+    }
     const chatbot = await prisma.chatbot.create({
       data: {
         workspaceId,
@@ -3381,13 +3604,23 @@ async function startServer() {
   });
 
   // Team
-  app.get("/api/team", requireAuth, async (req, res) => {
+  app.get("/api/team", requireAuth, requireWorkspaceAccessFromQuery, async (req, res) => {
     const { workspaceId } = req.query;
     const members = await prisma.workspaceMembership.findMany({
       where: { workspaceId: workspaceId as string },
-      include: { user: true }
+      include: {
+        user: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            image: true,
+            emailVerified: true,
+          }
+        }
+      }
     });
-    res.json(members);
+    res.json(members.map(sanitizeMembership));
   });
 
   app.post("/api/team", requireAuth, requireSubscribedWorkspaceFromBody, async (req: any, res) => {
@@ -3455,7 +3688,17 @@ async function startServer() {
         workspaceId,
         userId: user.id
       },
-      include: { user: true }
+      include: {
+        user: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            image: true,
+            emailVerified: true,
+          }
+        }
+      }
     });
 
     if (existingMembership) {
@@ -3470,11 +3713,19 @@ async function startServer() {
         status: 'ACTIVE',
       },
       include: {
-        user: true
+        user: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            image: true,
+            emailVerified: true,
+          }
+        }
       }
     });
 
-    res.json(teamMember);
+    res.json(sanitizeMembership(teamMember));
   });
 
   app.patch("/api/team/:id", requireAuth, requireSubscribedWorkspaceFromBody, async (req: any, res) => {
@@ -3502,7 +3753,15 @@ async function startServer() {
         workspaceId
       },
       include: {
-        user: true
+        user: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            image: true,
+            emailVerified: true,
+          }
+        }
       }
     });
 
@@ -3536,11 +3795,19 @@ async function startServer() {
         status: nextStatus
       },
       include: {
-        user: true
+        user: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            image: true,
+            emailVerified: true,
+          }
+        }
       }
     });
 
-    res.json(updatedMembership);
+    res.json(sanitizeMembership(updatedMembership));
   });
 
   app.delete("/api/team/:id", requireAuth, requireSubscribedWorkspaceFromBody, async (req: any, res) => {
@@ -3591,7 +3858,7 @@ async function startServer() {
   });
 
   // Contacts / CRM
-  app.get("/api/contacts", requireAuth, async (req, res) => {
+  app.get("/api/contacts", requireAuth, requireWorkspaceAccessFromQuery, async (req, res) => {
     const { workspaceId } = req.query;
     const contacts = await prisma.contact.findMany({
       where: { workspaceId: workspaceId as string },
@@ -3620,6 +3887,10 @@ async function startServer() {
     }
 
     const resolvedListIds = await resolveContactListIds(workspaceId, listIds, listNames);
+
+    if (!(await enforceWorkspacePlanLimit(res, workspaceId, 'contacts'))) {
+      return;
+    }
 
     const contact = await prisma.contact.create({
       data: {
@@ -3754,6 +4025,19 @@ async function startServer() {
         .filter(([digits]) => Boolean(digits))
     );
 
+    const newPhonesToCreate = new Set<string>();
+    for (const row of preparedRows) {
+      const phoneValue = normalizedMappings.phoneNumber ? String(row[normalizedMappings.phoneNumber] ?? '').trim() : '';
+      const normalizedPhone = normalizePhone(phoneValue);
+      if (normalizedPhone && !existingByPhone.has(normalizedPhone)) {
+        newPhonesToCreate.add(normalizedPhone);
+      }
+    }
+
+    if (!(await enforceWorkspacePlanLimit(res, workspaceId, 'contacts', newPhonesToCreate.size))) {
+      return;
+    }
+
     let created = 0;
     let updated = 0;
     let skipped = 0;
@@ -3874,7 +4158,7 @@ async function startServer() {
     });
   });
 
-  app.get("/api/contacts/:id", requireAuth, async (req, res) => {
+  app.get("/api/contacts/:id", requireAuth, requireContactAccess, async (req, res) => {
     const contact = await prisma.contact.findUnique({
       where: { id: req.params.id },
       include: {
@@ -3945,7 +4229,7 @@ async function startServer() {
     res.json(contact);
   });
 
-  app.get("/api/contact-lists", requireAuth, async (req, res) => {
+  app.get("/api/contact-lists", requireAuth, requireWorkspaceAccessFromQuery, async (req, res) => {
     const { workspaceId } = req.query;
     const lists = await prisma.contactList.findMany({
       where: { workspaceId: workspaceId as string },
@@ -4059,7 +4343,7 @@ async function startServer() {
   });
 
   // Tasks
-  app.get("/api/tasks", requireAuth, async (req, res) => {
+  app.get("/api/tasks", requireAuth, requireWorkspaceAccessFromQuery, async (req, res) => {
     const { workspaceId, contactId, conversationId } = req.query;
     const tasks = await prisma.task.findMany({
       where: { 
@@ -4147,6 +4431,9 @@ async function startServer() {
 
   app.post("/api/automation/rules", requireAuth, requireSubscribedWorkspaceFromBody, async (req, res) => {
     const { name, trigger, conditions, actions, workspaceId } = req.body;
+    if (!(await enforceWorkspacePlanLimit(res, workspaceId, 'automations'))) {
+      return;
+    }
     const rule = await prisma.automationRule.create({
       data: {
         name,
@@ -4160,7 +4447,7 @@ async function startServer() {
   });
 
   // Activity Logs
-  app.get("/api/activity-logs", requireAuth, async (req, res) => {
+  app.get("/api/activity-logs", requireAuth, requireWorkspaceAccessFromQuery, async (req, res) => {
     const { workspaceId, contactId, conversationId } = req.query;
     const logs = await prisma.activityLog.findMany({
       where: {
@@ -4175,7 +4462,7 @@ async function startServer() {
   });
 
   // Campaigns
-  app.get("/api/campaigns", requireAuth, async (req, res) => {
+  app.get("/api/campaigns", requireAuth, requireWorkspaceAccessFromQuery, async (req, res) => {
     const { workspaceId } = req.query;
     const campaigns = await prisma.broadcastCampaign.findMany({
       where: { workspaceId: workspaceId as string },
@@ -4278,6 +4565,10 @@ async function startServer() {
 
     if (!messageBody?.trim() && !headerImage) {
       return res.status(400).json({ error: "Add message content or a header image before launching the campaign" });
+    }
+
+    if (!(await enforceWorkspacePlanLimit(res, workspaceId, 'broadcasts'))) {
+      return;
     }
 
     const number = await prisma.whatsAppNumber.findFirst({
@@ -4502,26 +4793,8 @@ async function startServer() {
     }
   });
   // Superadmin Routes
-  app.get("/api/superadmin/stats", requireAuth, async (req, res) => {
-    const [totalUsers, totalWorkspaces, totalMessages, ledgerEntries] = await Promise.all([
-      prisma.user.count(),
-      prisma.workspace.count(),
-      prisma.message.count(),
-      prisma.billingLedgerEntry.findMany({ where: { type: 'CREDIT' } })
-    ]);
-
-    const totalRevenue = ledgerEntries.reduce((sum, entry) => sum + entry.amount, 0);
-
-    res.json({
-      totalUsers,
-      totalWorkspaces,
-      totalMessages,
-      totalRevenue
-    });
-  });
-
   // Dev Seeding Route
-  app.post("/api/dev/seed", requireAuth, async (req, res) => {
+  app.post("/api/dev/seed", requireAuth, requireSuperadmin, async (req, res) => {
     const { workspaceId, userId } = req.body;
     if (!workspaceId || !userId) return res.status(400).json({ error: "Missing workspaceId or userId" });
 
@@ -4594,17 +4867,243 @@ async function startServer() {
     }
   });
 
-  app.get("/api/superadmin/workspaces", requireAuth, async (req, res) => {
-    const workspaces = await prisma.workspace.findMany({
-      include: {
-        members: { take: 1 },
-        _count: {
-          select: { members: true }
+  const buildPlanBreakdown = (workspaces: Array<{ plan?: string | null }>) => {
+    const breakdown = {
+      NONE: 0,
+      STARTER: 0,
+      GROWTH: 0,
+      PRO: 0,
+      ENTERPRISE: 0,
+    };
+
+    for (const workspace of workspaces) {
+      const key = String(workspace.plan || 'NONE').toUpperCase() as keyof typeof breakdown;
+      if (key in breakdown) {
+        breakdown[key] += 1;
+      } else {
+        breakdown.NONE += 1;
+      }
+    }
+
+    return breakdown;
+  };
+
+  app.get("/api/superadmin/workspaces", requireAuth, requireSuperadmin, async (req, res) => {
+    try {
+      const workspaces = await prisma.workspace.findMany({
+        include: {
+          members: {
+            take: 5,
+            include: {
+              user: {
+                select: {
+                  id: true,
+                  name: true,
+                  email: true,
+                  emailVerified: true,
+                }
+              }
+            }
+          },
+          _count: {
+            select: {
+              members: true,
+              contacts: true,
+              conversations: true,
+              chatbots: true,
+              campaigns: true,
+              numbers: true,
+            }
+          }
+        },
+        orderBy: { createdAt: 'desc' }
+      });
+      res.json(workspaces.map((workspace) => ({
+        ...workspace,
+        members: workspace.members.map(sanitizeMembership),
+      })));
+    } catch (error) {
+      console.error('[superadmin:workspaces]', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.get("/api/superadmin/stats", requireAuth, requireSuperadmin, async (_req, res) => {
+    try {
+      const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+      const [allWorkspaces, totalUsers, totalMessages, ledgerEntries] = await Promise.all([
+        prisma.workspace.findMany({
+          select: {
+            id: true,
+            plan: true,
+            subscriptionStatus: true,
+            createdAt: true,
+          }
+        }),
+        prisma.user.count(),
+        prisma.message.count(),
+        prisma.billingLedgerEntry.findMany({ where: { type: 'CREDIT' } }),
+      ]);
+
+      const totalRevenue = ledgerEntries.reduce((sum, entry) => sum + entry.amount, 0);
+      const recentSignups = allWorkspaces.filter((workspace) => workspace.createdAt >= thirtyDaysAgo).length;
+      const activeSubscribers = allWorkspaces.filter((workspace) =>
+        ['active', 'trialing'].includes(String(workspace.subscriptionStatus || '').toLowerCase())
+      ).length;
+      const suspendedCount = 0;
+
+      res.json({
+        totalUsers,
+        totalWorkspaces: allWorkspaces.length,
+        totalMessages,
+        totalRevenue,
+        recentSignups,
+        activeSubscribers,
+        suspendedCount,
+        planBreakdown: buildPlanBreakdown(allWorkspaces),
+      });
+    } catch (error) {
+      console.error('[superadmin:stats]', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.get("/api/superadmin/workspaces/:id", requireAuth, requireSuperadmin, async (req, res) => {
+    try {
+      const workspace = await prisma.workspace.findUnique({
+        where: { id: req.params.id },
+        include: {
+          members: {
+            include: {
+              user: {
+                select: {
+                  id: true,
+                  name: true,
+                  email: true,
+                  emailVerified: true,
+                  createdAt: true,
+                }
+              }
+            }
+          },
+          _count: {
+            select: {
+              contacts: true,
+              conversations: true,
+              chatbots: true,
+              campaigns: true,
+              numbers: true,
+              activities: true,
+              tasks: true,
+            }
+          },
+          featureRequests: {
+            orderBy: { createdAt: 'desc' },
+            take: 10,
+          },
+          issueReports: {
+            orderBy: { createdAt: 'desc' },
+            take: 10,
+          },
+          ledgerEntries: {
+            orderBy: { createdAt: 'desc' },
+            take: 10,
+          },
+          usageLogs: {
+            orderBy: { createdAt: 'desc' },
+            take: 10,
+          },
         }
-      },
-      orderBy: { createdAt: 'desc' }
-    });
-    res.json(workspaces);
+      });
+
+      if (!workspace) {
+        return res.status(404).json({ error: 'Workspace not found' });
+      }
+
+      const totalMessageCount = await prisma.message.count({
+        where: {
+          conversation: {
+            workspaceId: workspace.id,
+          }
+        }
+      });
+
+      res.json({
+        ...workspace,
+        members: workspace.members.map(sanitizeMembership),
+        counts: {
+          ...workspace._count,
+          messages: totalMessageCount,
+        }
+      });
+    } catch (error) {
+      console.error('[superadmin:workspace-detail]', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.get("/api/superadmin/users", requireAuth, requireSuperadmin, async (req, res) => {
+    try {
+      const search = String(req.query.search || '').trim();
+      const page = Math.max(1, Number(req.query.page || 1) || 1);
+      const limit = Math.min(50, Math.max(1, Number(req.query.limit || 20) || 20));
+      const skip = (page - 1) * limit;
+
+      const where = search
+        ? {
+            OR: [
+              { email: { contains: search } },
+              { name: { contains: search } },
+            ]
+          }
+        : undefined;
+
+      const [total, users] = await Promise.all([
+        prisma.user.count({ where }),
+        prisma.user.findMany({
+          where,
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            emailVerified: true,
+            createdAt: true,
+            memberships: {
+              include: {
+                workspace: {
+                  select: {
+                    id: true,
+                    name: true,
+                    plan: true,
+                  }
+                }
+              }
+            }
+          },
+          orderBy: { createdAt: 'desc' },
+          skip,
+          take: limit,
+        })
+      ]);
+
+      res.json({
+        total,
+        page,
+        limit,
+        users: users.map((user) => ({
+          ...user,
+          memberships: user.memberships.map((membership) => ({
+            id: membership.id,
+            role: membership.role,
+            status: membership.status,
+            workspace: membership.workspace,
+          }))
+        }))
+      });
+    } catch (error) {
+      console.error('[superadmin:users]', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
   });
 
   // Vite middleware for development
