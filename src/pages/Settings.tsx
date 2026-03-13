@@ -26,7 +26,7 @@ import axios from 'axios';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
 import ActivationChecklist from '../components/ActivationChecklist';
-import { getPlanConfig, isPaidPlan, PLANS, PlanType } from '../constants/plans';
+import { ENTERPRISE_PLAN, formatLimitValue, getPlanConfig, getPlanPrice, isPaidPlan, PLAN_ORDER, PLANS, PlanType } from '../constants/plans';
 
 const settingsNav = [
   { icon: User, label: 'Personal', path: '/app/settings/personal' },
@@ -615,22 +615,47 @@ function Billing() {
                   </span>
                 </div>
                 {currentPlanInfo ? (
-                  <div className="space-y-4 mb-8">
+                  <div className="mb-8 space-y-5">
+                    <div>
+                      <p className="text-sm font-semibold text-gray-900 dark:text-white">{currentPlanInfo.shortLabel}</p>
+                      <p className="mt-1 text-sm leading-relaxed text-gray-500 dark:text-gray-400">{currentPlanInfo.description}</p>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="rounded-xl bg-slate-50 px-4 py-3 dark:bg-slate-800/60">
+                        <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500">Contacts</p>
+                        <p className="mt-1 text-lg font-semibold text-gray-900 dark:text-white">{formatLimitValue(currentPlanInfo.contactsLimit)}</p>
+                      </div>
+                      <div className="rounded-xl bg-slate-50 px-4 py-3 dark:bg-slate-800/60">
+                        <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500">Broadcasts / month</p>
+                        <p className="mt-1 text-lg font-semibold text-gray-900 dark:text-white">{formatLimitValue(currentPlanInfo.broadcastLimit)}</p>
+                      </div>
+                    </div>
                     <div className="flex justify-between text-sm">
                       <span className="text-gray-500 dark:text-gray-400">WhatsApp Numbers</span>
-                      <span className="font-semibold text-gray-900 dark:text-white">{currentPlanInfo.whatsappLimit}</span>
+                      <span className="font-semibold text-gray-900 dark:text-white">{formatLimitValue(currentPlanInfo.whatsappLimit)}</span>
                     </div>
                     <div className="flex justify-between text-sm">
                       <span className="text-gray-500 dark:text-gray-400">Instagram Accounts</span>
-                      <span className="font-semibold text-gray-900 dark:text-white">{currentPlanInfo.instagramLimit}</span>
+                      <span className="font-semibold text-gray-900 dark:text-white">{formatLimitValue(currentPlanInfo.instagramLimit)}</span>
                     </div>
                     <div className="flex justify-between text-sm">
-                      <span className="text-gray-500 dark:text-gray-400">AI Chatbots</span>
-                      <span className="font-semibold text-gray-900 dark:text-white">{currentPlanInfo.chatbotLimit}</span>
+                      <span className="text-gray-500 dark:text-gray-400">AI Assistants</span>
+                      <span className="font-semibold text-gray-900 dark:text-white">{formatLimitValue(currentPlanInfo.chatbotLimit)}</span>
                     </div>
                     <div className="flex justify-between text-sm">
                       <span className="text-gray-500 dark:text-gray-400">Users</span>
-                      <span className="font-semibold text-gray-900 dark:text-white">{currentPlanInfo.userLimit}</span>
+                      <span className="font-semibold text-gray-900 dark:text-white">{formatLimitValue(currentPlanInfo.userLimit)}</span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-gray-500 dark:text-gray-400">Automations</span>
+                      <span className="font-semibold text-gray-900 dark:text-white">{formatLimitValue(currentPlanInfo.automationLimit)}</span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-gray-500 dark:text-gray-400">Conversation History</span>
+                      <span className="font-semibold text-gray-900 dark:text-white">{currentPlanInfo.historyMonths} months</span>
+                    </div>
+                    <div className="rounded-xl border border-dashed border-gray-200 px-4 py-3 text-xs text-gray-500 dark:border-slate-700 dark:text-gray-400">
+                      {currentPlanInfo.supportLabel}
                     </div>
                   </div>
                 ) : (
@@ -702,8 +727,12 @@ function Billing() {
                 You selected the <span className="font-semibold text-[#25D366]">{PLANS[selectedPlanFromQuery]?.name || selectedPlanFromQuery}</span> plan from the homepage. Review it below and continue to checkout when you're ready.
               </div>
             )}
+            <div className="rounded-2xl border border-blue-100 bg-blue-50/80 px-5 py-4 text-sm text-blue-700 dark:border-blue-900/30 dark:bg-blue-950/20 dark:text-blue-200">
+              Monthly checkout works now. Annual pricing is already packaged below and can be connected once deployment billing is finalized.
+            </div>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              {(Object.entries(PLANS) as [PlanType, any][]).map(([key, plan]) => {
+              {PLAN_ORDER.map((key) => {
+                const plan = PLANS[key];
                 const isCurrent = isPaidPlan(currentPlan) && currentPlan === key;
                 const isRecommended = selectedPlanFromQuery === key && !isCurrent;
                 return (
@@ -713,7 +742,9 @@ function Billing() {
                   ? "border-[#25D366] ring-1 ring-[#25D366] shadow-md"
                   : isRecommended
                     ? "border-blue-300 ring-1 ring-blue-200 shadow-md dark:border-blue-500/50 dark:ring-blue-500/30"
-                    : "border-gray-100 dark:border-slate-800 shadow-sm hover:border-gray-200 dark:hover:border-slate-700"
+                    : plan.highlight
+                      ? "border-[#25D366]/50 shadow-md"
+                      : "border-gray-100 dark:border-slate-800 shadow-sm hover:border-gray-200 dark:hover:border-slate-700"
               )}>
                 {currentPlan === key && (
                   <div className="absolute top-0 right-0 bg-[#25D366] text-white text-[10px] font-bold px-3 py-1 rounded-bl-xl uppercase tracking-wider">
@@ -721,33 +752,34 @@ function Billing() {
                   </div>
                 )}
                 {isRecommended && (
-                  <div className="absolute top-0 right-0 bg-blue-600 text-white text-[10px] font-bold px-3 py-1 rounded-bl-xl uppercase tracking-wider">
-                    Selected
+                    <div className="absolute top-0 right-0 bg-blue-600 text-white text-[10px] font-bold px-3 py-1 rounded-bl-xl uppercase tracking-wider">
+                      Selected
+                    </div>
+                )}
+                {plan.highlight && !isCurrent && !isRecommended && (
+                  <div className="absolute top-0 left-0 bg-[#25D366] text-white text-[10px] font-bold px-3 py-1 rounded-br-xl uppercase tracking-wider">
+                    Most Popular
                   </div>
                 )}
                 <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-1">{plan.name}</h3>
-                <div className="flex items-baseline gap-1 mb-6">
-                  <span className="text-3xl font-bold text-gray-900 dark:text-white">AED {plan.price}</span>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-gray-400 dark:text-gray-500 mb-4">{plan.shortLabel}</p>
+                <div className="flex items-baseline gap-1">
+                  <span className="text-3xl font-bold text-gray-900 dark:text-white">AED {getPlanPrice(plan, 'monthly')}</span>
                   <span className="text-sm text-gray-500 dark:text-gray-400">/month</span>
                 </div>
+                <p className="mt-1 text-xs font-medium text-[#128C7E]">AED {plan.annualPrice}/month on annual billing</p>
+                <p className="mt-4 text-sm leading-relaxed text-gray-500 dark:text-gray-400">{plan.description}</p>
                 <ul className="space-y-4 mb-8">
-                  <li className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
-                    <CheckCircle2 className="w-4 h-4 text-[#25D366]" />
-                    {plan.whatsappLimit === 999 ? 'Unlimited' : plan.whatsappLimit} WhatsApp Number{plan.whatsappLimit !== 1 ? 's' : ''}
-                  </li>
-                  <li className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
-                    <CheckCircle2 className="w-4 h-4 text-[#25D366]" />
-                    {plan.instagramLimit === 999 ? 'Unlimited' : plan.instagramLimit} Instagram Account{plan.instagramLimit !== 1 ? 's' : ''}
-                  </li>
-                  <li className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
-                    <CheckCircle2 className="w-4 h-4 text-[#25D366]" />
-                    {plan.chatbotLimit === 999 ? 'Unlimited' : plan.chatbotLimit} AI Chatbot{plan.chatbotLimit !== 1 ? 's' : ''}
-                  </li>
-                  <li className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
-                    <CheckCircle2 className="w-4 h-4 text-[#25D366]" />
-                    {plan.userLimit === 999 ? 'Unlimited' : plan.userLimit} User{plan.userLimit !== 1 ? 's' : ''}
-                  </li>
+                  {plan.billingHighlights.map((item) => (
+                    <li key={item} className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
+                      <CheckCircle2 className="w-4 h-4 text-[#25D366]" />
+                      {item}
+                    </li>
+                  ))}
                 </ul>
+                <div className="mb-6 rounded-xl bg-slate-50 px-4 py-3 text-xs text-gray-500 dark:bg-slate-800/60 dark:text-gray-400">
+                  {plan.supportLabel}
+                </div>
                 <button 
                   disabled={isCurrent}
                   onClick={async () => {
@@ -786,6 +818,30 @@ function Billing() {
                 </button>
               </div>
             )})}
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+              <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                <div>
+                  <p className="text-sm font-bold uppercase tracking-[0.2em] text-slate-400">Enterprise</p>
+                  <h3 className="mt-2 text-2xl font-semibold text-gray-900 dark:text-white">{ENTERPRISE_PLAN.shortLabel}</h3>
+                  <p className="mt-2 max-w-3xl text-sm text-gray-500 dark:text-gray-400">{ENTERPRISE_PLAN.description}</p>
+                </div>
+                <a
+                  href="https://tawasel.io"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center justify-center rounded-xl bg-slate-900 px-5 py-3 text-sm font-bold text-white transition-colors hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600"
+                >
+                  {ENTERPRISE_PLAN.ctaLabel}
+                </a>
+              </div>
+              <div className="mt-6 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                {ENTERPRISE_PLAN.cardHighlights.map((item) => (
+                  <div key={item} className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-300">
+                    {item}
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
         } />

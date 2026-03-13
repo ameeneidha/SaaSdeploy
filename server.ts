@@ -38,8 +38,8 @@ const normalizePhone = (value?: string | null) => (value || "").replace(/\D/g, "
 const EMAIL_LIKE_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/i;
 const WORKSPACE_USER_LIMITS: Record<string, number> = {
   STARTER: 1,
-  GROWTH: 3,
-  PRO: 5,
+  GROWTH: 5,
+  PRO: 10,
 };
 
 const WORKSPACE_PLAN_LIMITS: Record<
@@ -64,7 +64,7 @@ const WORKSPACE_PLAN_LIMITS: Record<
     automations: 3,
   },
   GROWTH: {
-    users: 3,
+    users: 5,
     whatsapp: 2,
     instagram: 1,
     chatbots: 3,
@@ -73,7 +73,7 @@ const WORKSPACE_PLAN_LIMITS: Record<
     automations: 15,
   },
   PRO: {
-    users: 5,
+    users: 10,
     whatsapp: 5,
     instagram: 2,
     chatbots: 10,
@@ -1056,6 +1056,19 @@ async function getDashboardSections(workspaceId: string, query: any) {
     replyRate: toPercent(campaign.repliedCount, campaign._count?.recipients || 0),
   }));
 
+  const highUsageItems = usageItems
+    .filter((item) => item.percent >= 80)
+    .sort((left, right) => right.percent - left.percent);
+
+  const maxedUsageItems = highUsageItems.filter((item) => item.percent >= 100);
+  const usageAlertDetails = highUsageItems
+    .slice(0, 3)
+    .map((item) => `${item.label} ${item.percent}% (${item.used}/${item.limit})`)
+    .join(', ');
+
+  const usageAlertSuffix =
+    highUsageItems.length > 3 ? `, and ${highUsageItems.length - 3} more.` : '.';
+
   const alerts = [
     overdueConversations.length > 0
       ? {
@@ -1104,12 +1117,17 @@ async function getDashboardSections(workspaceId: string, query: any) {
           href: '/app/channels',
         }
       : null,
-    usageItems.find((item) => item.percent >= 80)
+    highUsageItems.length > 0
       ? {
           id: 'plan-limits',
-          severity: 'info',
-          title: 'Workspace is nearing a plan limit',
-          description: 'Usage is above 80% on at least one tracked resource.',
+          severity: maxedUsageItems.length > 0 ? 'warning' : 'info',
+          title:
+            maxedUsageItems.length > 0
+              ? maxedUsageItems.length === 1
+                ? `${maxedUsageItems[0].label} is fully used`
+                : `${maxedUsageItems.length} plan limits are fully used`
+              : 'Workspace is nearing a plan limit',
+          description: `${usageAlertDetails}${usageAlertSuffix}`,
           href: '/app/settings/billing/plans',
         }
       : null,

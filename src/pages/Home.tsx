@@ -1,171 +1,67 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { useApp } from '../contexts/AppContext';
 import axios from 'axios';
 import { motion } from 'motion/react';
-import { 
-  Check, 
-  MessageSquare, 
-  Zap, 
-  Shield, 
-  ArrowRight, 
-  LogIn, 
-  Mail, 
-  Lock, 
-  Loader2,
-  Globe,
+import {
+  ArrowRight,
   BarChart3,
-  Users
+  Check,
+  Globe,
+  Loader2,
+  Lock,
+  LogIn,
+  Mail,
+  MessageSquare,
+  Shield,
+  Users,
+  Zap,
 } from 'lucide-react';
+import { useApp } from '../contexts/AppContext';
+import {
+  ENTERPRISE_PLAN,
+  formatComparisonValue,
+  getPlanPrice,
+  PLAN_ORDER,
+  PLANS,
+  PRICING_ADD_ONS,
+  PRICING_COMPARISON_GROUPS,
+  PRICING_FAQ,
+  PRICING_TRUST_SIGNALS,
+  PRICING_VALUE_STATEMENT,
+  type BillingCycle,
+} from '../constants/plans';
 
-const translations = {
-  en: {
-    nav: {
-      features: 'Features',
-      pricing: 'Pricing',
-      signIn: 'Sign In'
-    },
-    hero: {
-      badge: 'Next-Gen WhatsApp CRM',
-      title: 'Automate your ',
-      titleAccent: 'WhatsApp',
-      titleEnd: ' operations.',
-      desc: 'Connect with customers, automate support with AI, and scale your business using the world\'s most popular messaging platform.',
-      cta: 'View Pricing',
-      trusted: 'Trusted by 2,000+ teams'
-    },
-    login: {
-      title: 'Sign in to Tawasel App',
-      desc: 'Access your dashboard and conversations',
-      email: 'Email Address',
-      password: 'Password',
-      button: 'Sign In',
-      forgotPassword: 'Forgot password?'
-    },
-    features: {
-      title: 'Everything you need to scale',
-      desc: 'Powerful tools designed to help you manage thousands of conversations without breaking a sweat.',
-      items: [
-        { title: 'Multi-Channel', desc: 'Manage WhatsApp, Instagram, and Web Chat in one unified inbox.' },
-        { title: 'AI Automation', desc: 'Deploy smart chatbots that handle 80% of routine inquiries automatically.' },
-        { title: 'Deep Analytics', desc: 'Track response times, agent performance, and customer satisfaction.' },
-        { title: 'Team Collaboration', desc: 'Assign conversations, add internal notes, and work together seamlessly.' },
-        { title: 'Enterprise Secure', desc: 'Bank-grade encryption and full compliance with data regulations.' },
-        { title: 'Broadcasts', desc: 'Send personalized bulk messages to your customers with high open rates.' }
-      ]
-    },
-    pricing: {
-      title: 'Simple, transparent pricing',
-      desc: 'Choose the plan that\'s right for your business growth.',
-      popular: 'Most Popular',
-      month: '/mo'
-    },
-    footer: {
-      desc: 'The ultimate platform for WhatsApp Business automation and customer engagement.',
-      product: 'Product',
-      company: 'Company',
-      created: 'Created by'
-    }
-  },
-  ar: {
-    nav: {
-      features: 'المميزات',
-      pricing: 'الأسعار',
-      signIn: 'تسجيل الدخول'
-    },
-    hero: {
-      badge: 'الجيل القادم من CRM واتساب',
-      title: 'أتمتة عمليات ',
-      titleAccent: 'الواتساب',
-      titleEnd: ' الخاصة بك.',
-      desc: 'تواصل مع عملائك، وأتمت الدعم باستخدام الذكاء الاصطناعي، ووسع نطاق عملك باستخدام أشهر منصة مراسلة في العالم.',
-      cta: 'عرض الأسعار',
-      trusted: 'موثوق به من قبل أكثر من 2000 فريق'
-    },
-    login: {
-      title: 'تسجيل الدخول إلى المركز',
-      desc: 'الوصول إلى لوحة التحكم والمحادثات الخاصة بك',
-      email: 'البريد الإلكتروني',
-      password: 'كلمة المرور',
-      button: 'تسجيل الدخول',
-      forgotPassword: 'هل نسيت كلمة المرور؟'
-    },
-    features: {
-      title: 'كل ما تحتاجه للتوسع',
-      desc: 'أدوات قوية مصممة لمساعدتك في إدارة آلاف المحادثات دون عناء.',
-      items: [
-        { title: 'متعدد القنوات', desc: 'إدارة واتساب وإنستغرام والدردشة عبر الويب في صندوق وارد واحد موحد.' },
-        { title: 'أتمتة الذكاء الاصطناعي', desc: 'نشر روبوتات دردشة ذكية تتعامل مع 80٪ من الاستفسارات الروتينية تلقائيًا.' },
-        { title: 'تحليلات عميقة', desc: 'تتبع أوقات الاستجابة وأداء الوكلاء ورضا العملاء.' },
-        { title: 'تعاون الفريق', desc: 'تعيين المحادثات وإضافة ملاحظات داخلية والعمل معًا بسلاسة.' },
-        { title: 'أمان المؤسسات', desc: 'تشفير بمستوى بنكي وامتثال كامل للوائح البيانات.' },
-        { title: 'البث', desc: 'إرسال رسائل جماعية مخصصة لعملائك بمعدلات فتح عالية.' }
-      ]
-    },
-    pricing: {
-      title: 'أسعار بسيطة وشفافة',
-      desc: 'اختر الخطة المناسبة لنمو عملك.',
-      popular: 'الأكثر شعبية',
-      month: '/شهرياً'
-    },
-    footer: {
-      desc: 'المنصة المثالية لأتمتة واتساب للأعمال وتفاعل العملاء.',
-      product: 'المنتج',
-      company: 'الشركة',
-      created: 'تم التطوير بواسطة'
-    }
-  }
-};
-
-const PRICING_PLANS = [
+const FEATURE_ITEMS = [
   {
-    id: 'starter',
-    name: { en: 'Starter', ar: 'البداية' },
-    price: { en: 'AED 99', ar: '99 درهم' },
-    description: { en: 'Essential tools for small businesses.', ar: 'أدوات أساسية للشركات الصغيرة.' },
-    features: {
-      en: ['1 WhatsApp Number', '1 Instagram Account', '1 AI Chatbot', '1 User', 'Standard Support'],
-      ar: ['رقم واتساب واحد', 'حساب إنستغرام واحد', 'روبوت ذكاء اصطناعي واحد', 'مستخدم واحد', 'دعم قياسي']
-    },
-    buttonText: { en: 'Get Started', ar: 'ابدأ الآن' },
-    highlight: false
+    title: 'One inbox for every customer conversation',
+    desc: 'Handle WhatsApp, Instagram, and future channels from one shared workspace instead of switching between apps.',
+    icon: Globe,
   },
   {
-    id: 'growth',
-    name: { en: 'Growth', ar: 'النمو' },
-    price: { en: 'AED 299', ar: '299 درهم' },
-    description: { en: 'Perfect for growing teams and automation.', ar: 'مثالي للفرق المتنامية والأتمتة.' },
-    features: {
-      en: ['2 WhatsApp Numbers', '1 Instagram Account', '3 AI Chatbots', '3 Users', 'Priority Support'],
-      ar: ['رقمان واتساب', 'حساب إنستغرام واحد', '3 روبوتات ذكاء اصطناعي', '3 مستخدمين', 'دعم ذو أولوية']
-    },
-    buttonText: { en: 'Get Started', ar: 'ابدأ الآن' },
-    highlight: true
+    title: 'AI that keeps leads warm after hours',
+    desc: 'Let Tawasel answer FAQs, qualify leads, and support customers while your team is offline.',
+    icon: Zap,
   },
   {
-    id: 'pro',
-    name: { en: 'Pro', ar: 'المحترف' },
-    price: { en: 'AED 599', ar: '599 درهم' },
-    description: { en: 'Advanced features for high-volume operations.', ar: 'ميزات متقدمة للعمليات ذات الحجم الكبير.' },
-    features: {
-      en: ['5 WhatsApp Numbers', '2 Instagram Accounts', '10 AI Chatbots', '5 Users', '24/7 Priority Support'],
-      ar: ['5 أرقام واتساب', 'حسابان إنستغرام', '10 روبوتات ذكاء اصطناعي', '5 مستخدمين', 'دعم ذو أولوية على مدار الساعة']
-    },
-    buttonText: { en: 'Get Started', ar: 'ابدأ الآن' },
-    highlight: false
+    title: 'KPI dashboard built for operations',
+    desc: 'Track unread messages, SLA risk, pipeline health, campaigns, and AI spend in one dashboard.',
+    icon: BarChart3,
   },
   {
-    id: 'enterprise',
-    name: { en: 'Enterprise', ar: 'المؤسسات' },
-    price: { en: 'Custom', ar: 'مخصص' },
-    description: { en: 'Tailored solutions for large scale needs.', ar: 'حلول مخصصة للاحتياجات واسعة النطاق.' },
-    features: {
-      en: ['Custom Channels', 'Custom Bots', '10+ Users', 'Advanced Integrations', 'Dedicated Manager'],
-      ar: ['قنوات مخصصة', 'روبوتات مخصصة', 'أكثر من 10 مستخدمين', 'تكاملات متقدمة', 'مدير حساب مخصص']
-    },
-    buttonText: { en: 'Contact Sales', ar: 'اتصل بالمبيعات' },
-    highlight: false
-  }
+    title: 'Real team collaboration',
+    desc: 'Assign chats, add internal notes, track ownership, and see exactly who replied to each customer.',
+    icon: Users,
+  },
+  {
+    title: 'Secure by design',
+    desc: 'Use verified workspaces, role-based permissions, and a controlled onboarding flow for every account.',
+    icon: Shield,
+  },
+  {
+    title: 'Broadcasts with targeting and review',
+    desc: 'Segment by pipeline or contact list, preview content, send tests, and review delivery performance after launch.',
+    icon: MessageSquare,
+  },
 ];
 
 export default function Home() {
@@ -175,28 +71,26 @@ export default function Home() {
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
-  const [lang, setLang] = useState<'en' | 'ar'>('en');
   const [isSignUp, setIsSignUp] = useState(true);
   const [name, setName] = useState('');
+  const [billingCycle, setBillingCycle] = useState<BillingCycle>('monthly');
   const trustedTeamMarkers = ['MK', 'SA', 'LR', 'NH'];
 
-  const t = translations[lang];
-  const isRtl = lang === 'ar';
   const handlePlanSelect = (planId: string) => {
     sessionStorage.setItem('pendingPlan', planId);
+    sessionStorage.setItem('pendingBillingCycle', billingCycle);
     navigate(user ? `/app/settings/billing/plans?plan=${planId}` : `/register?plan=${planId}`);
   };
 
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleLogin = async (event: React.FormEvent) => {
+    event.preventDefault();
     setIsLoading(true);
     setError('');
     try {
       const endpoint = isSignUp ? '/api/auth/register' : '/api/auth/login';
       const payload = isSignUp ? { name, email, password } : { email, password };
-      
-      const res = await axios.post(endpoint, payload);
-      setUser(res.data.user, res.data.token);
+      const response = await axios.post(endpoint, payload);
+      setUser(response.data.user, response.data.token);
       navigate('/app/dashboard');
     } catch (err: any) {
       setError(err.response?.data?.error || (isSignUp ? 'Registration failed' : 'Login failed'));
@@ -206,120 +100,141 @@ export default function Home() {
   };
 
   return (
-    <div className={`min-h-screen bg-white text-slate-900 font-sans selection:bg-[#25D366]/30 ${isRtl ? 'text-right' : 'text-left'}`} dir={isRtl ? 'rtl' : 'ltr'}>
-      {/* Navigation */}
-      <nav className="fixed top-0 w-full z-50 bg-white/80 backdrop-blur-md border-b border-slate-100">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+    <div className="min-h-screen bg-white text-slate-900 font-sans selection:bg-[#25D366]/30">
+      <nav className="fixed top-0 z-50 w-full border-b border-slate-100 bg-white/85 backdrop-blur-md">
+        <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 bg-[#25D366] rounded-lg flex items-center justify-center">
-              <MessageSquare className="w-5 h-5 text-white" />
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#25D366]">
+              <MessageSquare className="h-5 w-5 text-white" />
             </div>
             <span className="text-xl font-bold tracking-tight">Tawasel App</span>
           </div>
-          <div className="hidden md:flex items-center gap-8 text-sm font-medium text-slate-600">
-            <a href="#features" className="hover:text-[#25D366] transition-colors">{t.nav.features}</a>
-            <a href="#pricing" className="hover:text-[#25D366] transition-colors">{t.nav.pricing}</a>
-            <button 
-              onClick={() => setLang(lang === 'en' ? 'ar' : 'en')}
-              className="px-3 py-1 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors"
-            >
-              {lang === 'en' ? 'العربية' : 'English'}
-            </button>
-            <a href="#login" className="px-4 py-2 bg-slate-900 text-white rounded-full hover:bg-slate-800 transition-colors">{t.nav.signIn}</a>
+
+          <div className="hidden items-center gap-8 text-sm font-medium text-slate-600 md:flex">
+            <a href="#features" className="transition-colors hover:text-[#25D366]">
+              Features
+            </a>
+            <a href="#pricing" className="transition-colors hover:text-[#25D366]">
+              Pricing
+            </a>
+            {user ? (
+              <button
+                type="button"
+                onClick={() => navigate('/app/dashboard')}
+                className="rounded-full bg-slate-900 px-4 py-2 text-white transition-colors hover:bg-slate-800"
+              >
+                Open Dashboard
+              </button>
+            ) : (
+              <a href="#login" className="rounded-full bg-slate-900 px-4 py-2 text-white transition-colors hover:bg-slate-800">
+                Sign In
+              </a>
+            )}
           </div>
         </div>
       </nav>
 
-      {/* Hero Section */}
-      <section className="pt-32 pb-20 px-4">
-        <div className="max-w-7xl mx-auto grid lg:grid-cols-2 gap-12 items-center">
+      <section className="px-4 pb-20 pt-32">
+        <div className="mx-auto grid max-w-7xl items-center gap-12 lg:grid-cols-2">
           <motion.div
-            initial={{ opacity: 0, x: isRtl ? 20 : -20 }}
+            initial={{ opacity: 0, x: -20 }}
             animate={{ opacity: 1, x: 0 }}
             transition={{ duration: 0.6 }}
           >
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[#25D366]/10 text-[#25D366] text-xs font-bold uppercase tracking-wider mb-6">
-              <Zap className="w-3 h-3" />
-              {t.hero.badge}
+            <div className="mb-6 inline-flex items-center gap-2 rounded-full bg-[#25D366]/10 px-3 py-1 text-xs font-bold uppercase tracking-wider text-[#25D366]">
+              <Zap className="h-3 w-3" />
+              Built for UAE teams that run on WhatsApp
             </div>
-            <h1 className="text-5xl lg:text-7xl font-bold leading-[1.1] tracking-tight mb-6">
-              {t.hero.title}<span className="text-[#25D366]">{t.hero.titleAccent}</span>{t.hero.titleEnd}
+            <h1 className="mb-6 text-5xl font-bold leading-[1.05] tracking-tight lg:text-7xl">
+              Turn WhatsApp into your
+              <span className="text-[#25D366]"> sales, support, and follow-up engine.</span>
             </h1>
-            <p className="text-xl text-slate-600 mb-8 max-w-lg leading-relaxed">
-              {t.hero.desc}
+            <p className="mb-8 max-w-xl text-xl leading-relaxed text-slate-600">
+              Tawasel gives your team one inbox, one CRM workflow, and one performance dashboard so no lead gets lost between chats, follow-ups, and campaigns.
             </p>
             <div className="flex flex-wrap gap-4">
-              <a href="#pricing" className="px-8 py-4 bg-[#25D366] text-white font-bold rounded-xl hover:bg-[#128C7E] transition-all shadow-lg shadow-[#25D366]/20 flex items-center gap-2">
-                {t.hero.cta} <ArrowRight className={`w-5 h-5 ${isRtl ? 'rotate-180' : ''}`} />
+              <a
+                href="#pricing"
+                className="flex items-center gap-2 rounded-xl bg-[#25D366] px-8 py-4 font-bold text-white shadow-lg shadow-[#25D366]/20 transition-all hover:bg-[#128C7E]"
+              >
+                View Pricing <ArrowRight className="h-5 w-5" />
               </a>
-              <div className={`flex ${isRtl ? 'flex-row-reverse' : 'flex-row'} -space-x-2 items-center`}>
+              <div className="ml-0 flex items-center -space-x-2">
                 {trustedTeamMarkers.map((initials) => (
                   <div
                     key={initials}
-                    className={`flex h-10 w-10 items-center justify-center rounded-full border-2 border-white bg-slate-900 text-xs font-bold text-white ${isRtl ? 'ml-[-8px]' : 'mr-[-8px]'}`}
+                    className="flex h-10 w-10 items-center justify-center rounded-full border-2 border-white bg-slate-900 text-xs font-bold text-white"
                   >
                     {initials}
                   </div>
                 ))}
-                <span className={`${isRtl ? 'mr-4' : 'ml-4'} text-sm font-medium text-slate-500`}>{t.hero.trusted}</span>
+                <span className="ml-4 text-sm font-medium text-slate-500">Trusted by 2,000+ teams</span>
               </div>
             </div>
           </motion.div>
 
           <motion.div
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ duration: 0.6, delay: 0.2 }}
             id="login"
-            className="bg-slate-50 rounded-3xl p-8 lg:p-12 border border-slate-200"
+            initial={{ opacity: 0, scale: 0.96 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ duration: 0.6, delay: 0.15 }}
+            className="rounded-3xl border border-slate-200 bg-slate-50 p-8 lg:p-12"
           >
             <div className="mb-8">
-              <h2 className="text-2xl font-bold mb-2">{isSignUp ? (isRtl ? 'إنشاء حساب' : 'Create Account') : t.login.title}</h2>
-              <p className="text-slate-500">{isSignUp ? (isRtl ? 'ابدأ رحلتك مع Tawasel App اليوم' : 'Start your journey with Tawasel App today') : t.login.desc}</p>
+              <h2 className="mb-2 text-2xl font-bold">{isSignUp ? 'Create your account' : 'Sign in to Tawasel App'}</h2>
+              <p className="text-slate-500">
+                {isSignUp
+                  ? 'Create your workspace now, then unlock channels, CRM, and automation from billing.'
+                  : 'Access your dashboard, inbox, and team workflows.'}
+              </p>
             </div>
 
-            <div className="flex p-1 bg-slate-200 rounded-xl mb-8">
+            <div className="mb-8 flex rounded-xl bg-slate-200 p-1">
               <button
                 onClick={() => setIsSignUp(false)}
-                className={`flex-1 py-2 text-sm font-bold rounded-lg transition-all ${!isSignUp ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500 hover:text-slate-700'}`}
+                className={`flex-1 rounded-lg py-2 text-sm font-bold transition-all ${
+                  !isSignUp ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+                }`}
               >
-                {isRtl ? 'تسجيل الدخول' : 'Sign In'}
+                Sign In
               </button>
               <button
                 onClick={() => setIsSignUp(true)}
-                className={`flex-1 py-2 text-sm font-bold rounded-lg transition-all ${isSignUp ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500 hover:text-slate-700'}`}
+                className={`flex-1 rounded-lg py-2 text-sm font-bold transition-all ${
+                  isSignUp ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+                }`}
               >
-                {isRtl ? 'إنشاء حساب' : 'Sign Up'}
+                Sign Up
               </button>
             </div>
 
             <form onSubmit={handleLogin} className="space-y-4">
-              {isSignUp && (
+              {isSignUp ? (
                 <div className="space-y-1.5">
-                  <label className="text-xs font-bold uppercase tracking-wider text-slate-500">{isRtl ? 'الاسم الكامل' : 'Full Name'}</label>
+                  <label className="text-xs font-bold uppercase tracking-wider text-slate-500">Full Name</label>
                   <div className="relative">
-                    <Users className={`absolute ${isRtl ? 'right-3' : 'left-3'} top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400`} />
+                    <Users className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                     <input
                       type="text"
                       value={name}
-                      onChange={(e) => setName(e.target.value)}
-                      className={`w-full ${isRtl ? 'pr-10 pl-4' : 'pl-10 pr-4'} py-3 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-[#25D366]/20 focus:border-[#25D366] outline-none transition-all`}
-                      placeholder={isRtl ? 'جون دو' : 'John Doe'}
-                      required={isSignUp}
+                      onChange={(event) => setName(event.target.value)}
+                      className="w-full rounded-xl border border-slate-200 bg-white py-3 pl-10 pr-4 outline-none transition-all focus:border-[#25D366] focus:ring-2 focus:ring-[#25D366]/20"
+                      placeholder="John Doe"
+                      required
                     />
                   </div>
                 </div>
-              )}
+              ) : null}
 
               <div className="space-y-1.5">
-                <label className="text-xs font-bold uppercase tracking-wider text-slate-500">{t.login.email}</label>
+                <label className="text-xs font-bold uppercase tracking-wider text-slate-500">Email Address</label>
                 <div className="relative">
-                  <Mail className={`absolute ${isRtl ? 'right-3' : 'left-3'} top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400`} />
+                  <Mail className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                   <input
                     type="email"
                     value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    className={`w-full ${isRtl ? 'pr-10 pl-4' : 'pl-10 pr-4'} py-3 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-[#25D366]/20 focus:border-[#25D366] outline-none transition-all`}
+                    onChange={(event) => setEmail(event.target.value)}
+                    className="w-full rounded-xl border border-slate-200 bg-white py-3 pl-10 pr-4 outline-none transition-all focus:border-[#25D366] focus:ring-2 focus:ring-[#25D366]/20"
                     placeholder="name@company.com"
                     required
                   />
@@ -327,198 +242,388 @@ export default function Home() {
               </div>
 
               <div className="space-y-1.5">
-                <div className={`flex items-center justify-between gap-3 ${isRtl ? 'flex-row-reverse' : ''}`}>
-                  <label className="text-xs font-bold uppercase tracking-wider text-slate-500">{t.login.password}</label>
-                  {!isSignUp && (
+                <div className="flex items-center justify-between gap-3">
+                  <label className="text-xs font-bold uppercase tracking-wider text-slate-500">Password</label>
+                  {!isSignUp ? (
                     <button
                       type="button"
                       onClick={() => navigate('/forgot-password')}
-                      className="text-[11px] font-semibold text-[#25D366] hover:text-[#128C7E] transition-colors"
+                      className="text-[11px] font-semibold text-[#25D366] transition-colors hover:text-[#128C7E]"
                     >
-                      {t.login.forgotPassword}
+                      Forgot password?
                     </button>
-                  )}
+                  ) : null}
                 </div>
                 <div className="relative">
-                  <Lock className={`absolute ${isRtl ? 'right-3' : 'left-3'} top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400`} />
+                  <Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                   <input
                     type="password"
                     value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    className={`w-full ${isRtl ? 'pr-10 pl-4' : 'pl-10 pr-4'} py-3 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-[#25D366]/20 focus:border-[#25D366] outline-none transition-all`}
-                    placeholder="••••••••"
+                    onChange={(event) => setPassword(event.target.value)}
+                    className="w-full rounded-xl border border-slate-200 bg-white py-3 pl-10 pr-4 outline-none transition-all focus:border-[#25D366] focus:ring-2 focus:ring-[#25D366]/20"
+                    placeholder="........"
                     required
                   />
                 </div>
               </div>
 
-              {error && (
-                <div className="p-3 bg-red-50 border border-red-100 text-red-600 text-sm rounded-lg">
-                  {error}
-                </div>
-              )}
+              {error ? <div className="rounded-lg border border-red-100 bg-red-50 p-3 text-sm text-red-600">{error}</div> : null}
 
               <button
                 type="submit"
                 disabled={isLoading}
-                className="w-full py-4 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+                className="flex w-full items-center justify-center gap-2 rounded-xl bg-slate-900 py-4 font-bold text-white transition-all hover:bg-slate-800 disabled:opacity-50"
               >
-                {isLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : (
+                {isLoading ? (
+                  <Loader2 className="h-5 w-5 animate-spin" />
+                ) : (
                   <>
-                    {isSignUp ? (isRtl ? 'إنشاء حساب' : 'Create Account') : t.login.button} 
-                    {isSignUp ? <Zap className="w-5 h-5 text-[#25D366]" /> : <LogIn className={`w-5 h-5 ${isRtl ? 'rotate-180' : ''}`} />}
+                    {isSignUp ? 'Create Account' : 'Sign In'}
+                    {isSignUp ? <Zap className="h-5 w-5 text-[#25D366]" /> : <LogIn className="h-5 w-5" />}
                   </>
                 )}
               </button>
             </form>
-            {isSignUp && (
+
+            {isSignUp ? (
               <p className="mt-4 text-sm text-slate-500">
-                Create your workspace first, then choose a paid package to unlock sending, CRM, and automation.
+                Your workspace opens first, then billing unlocks the paid package you choose.
               </p>
-            )}
+            ) : null}
           </motion.div>
         </div>
       </section>
 
-      {/* Features Grid */}
-      <section id="features" className="py-24 bg-slate-50">
-        <div className="max-w-7xl mx-auto px-4">
-          <div className="text-center mb-16">
-            <h2 className="text-3xl font-bold mb-4">{t.features.title}</h2>
-            <p className="text-slate-600 max-w-2xl mx-auto">{t.features.desc}</p>
+      <section id="features" className="bg-slate-50 py-24">
+        <div className="mx-auto max-w-7xl px-4">
+          <div className="mb-16 text-center">
+            <h2 className="mb-4 text-3xl font-bold">Everything you need to run conversations like a real revenue channel</h2>
+            <p className="mx-auto max-w-2xl text-slate-600">
+              Tawasel is not just a shared inbox. It combines CRM, AI, campaigns, and accountability so your team can move faster without losing context.
+            </p>
           </div>
 
-          <div className="grid md:grid-cols-3 gap-8">
-            {t.features.items.map((feature, i) => {
-              const icons = [Globe, Zap, BarChart3, Users, Shield, MessageSquare];
-              const Icon = icons[i];
-              return (
-                <div key={i} className="bg-white p-8 rounded-2xl border border-slate-200 hover:shadow-xl hover:-translate-y-1 transition-all">
-                  <div className={`w-12 h-12 bg-[#25D366]/10 rounded-xl flex items-center justify-center mb-6 ${isRtl ? 'mr-0' : 'ml-0'}`}>
-                    <Icon className="w-6 h-6 text-[#25D366]" />
-                  </div>
-                  <h3 className="text-xl font-bold mb-3">{feature.title}</h3>
-                  <p className="text-slate-600 leading-relaxed">{feature.desc}</p>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      </section>
-
-      {/* Pricing Section */}
-      <section id="pricing" className="py-24">
-        <div className="max-w-7xl mx-auto px-4">
-          <div className="text-center mb-16">
-            <h2 className="text-4xl font-bold mb-4">{t.pricing.title}</h2>
-            <p className="text-slate-600">{t.pricing.desc}</p>
-          </div>
-
-          <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
-            {PRICING_PLANS.map((plan) => (
-              <div 
-                key={plan.id}
-                className={`relative p-8 rounded-3xl border transition-all ${
-                  plan.highlight 
-                    ? 'border-[#25D366] bg-white shadow-2xl scale-105 z-10' 
-                    : 'border-slate-200 bg-slate-50 hover:bg-white hover:shadow-xl'
-                }`}
+          <div className="grid gap-8 md:grid-cols-3">
+            {FEATURE_ITEMS.map((feature) => (
+              <div
+                key={feature.title}
+                className="rounded-2xl border border-slate-200 bg-white p-8 transition-all hover:-translate-y-1 hover:shadow-xl"
               >
-                {plan.highlight && (
-                  <div className="absolute -top-4 left-1/2 -translate-x-1/2 bg-[#25D366] text-white text-[10px] font-bold uppercase tracking-widest px-3 py-1 rounded-full">
-                    {t.pricing.popular}
-                  </div>
-                )}
-                <div className="mb-8">
-                  <h3 className="text-xl font-bold mb-2">{plan.name[lang]}</h3>
-                  <div className={`flex items-baseline gap-1 mb-4 ${isRtl ? 'flex-row-reverse justify-end' : ''}`}>
-                    <span className="text-4xl font-bold">{plan.price[lang]}</span>
-                    {plan.price[lang] !== 'Custom' && plan.price[lang] !== 'مخصص' && <span className="text-slate-500 font-medium">{t.pricing.month}</span>}
-                  </div>
-                  <p className="text-slate-600 text-sm leading-relaxed">{plan.description[lang]}</p>
+                <div className="mb-6 flex h-12 w-12 items-center justify-center rounded-xl bg-[#25D366]/10">
+                  <feature.icon className="h-6 w-6 text-[#25D366]" />
                 </div>
-
-                <ul className="space-y-4 mb-8">
-                  {plan.features[lang].map((feature, i) => (
-                    <li key={i} className="flex items-center gap-3 text-sm font-medium text-slate-700">
-                      <div className="w-5 h-5 rounded-full bg-[#25D366]/10 flex items-center justify-center flex-shrink-0">
-                        <Check className="w-3 h-3 text-[#25D366]" />
-                      </div>
-                      {feature}
-                    </li>
-                  ))}
-                </ul>
-
-                <button 
-                  onClick={() => {
-                    if (plan.id === 'enterprise') {
-                      window.open('https://tawasel.io', '_blank', 'noopener,noreferrer');
-                      return;
-                    }
-                    handlePlanSelect(plan.id);
-                  }}
-                  className={`w-full py-4 rounded-xl font-bold transition-all ${
-                  plan.highlight
-                    ? 'bg-[#25D366] text-white hover:bg-[#128C7E] shadow-lg shadow-[#25D366]/20'
-                    : 'bg-slate-200 text-slate-900 hover:bg-slate-300'
-                }`}>
-                  {plan.buttonText[lang]}
-                </button>
+                <h3 className="mb-3 text-xl font-bold">{feature.title}</h3>
+                <p className="leading-relaxed text-slate-600">{feature.desc}</p>
               </div>
             ))}
           </div>
         </div>
       </section>
 
-      {/* Footer */}
-      <footer className="bg-slate-900 text-white py-20">
-        <div className="max-w-7xl mx-auto px-4 grid md:grid-cols-4 gap-12">
+      <section id="pricing" className="py-24">
+        <div className="mx-auto max-w-7xl px-4">
+          <div className="mb-16 text-center">
+            <h2 className="mb-4 text-4xl font-bold">Simple pricing. Clear upgrade paths.</h2>
+            <p className="mx-auto max-w-3xl text-slate-600">
+              Pick the package that matches your team now, then unlock more automation, analytics, and collaboration as your customer volume grows.
+            </p>
+            <div className="mt-8 inline-flex rounded-full border border-slate-200 bg-slate-50 p-1">
+              <button
+                type="button"
+                onClick={() => setBillingCycle('monthly')}
+                className={`rounded-full px-5 py-2 text-sm font-semibold transition-all ${
+                  billingCycle === 'monthly' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                Monthly
+              </button>
+              <button
+                type="button"
+                onClick={() => setBillingCycle('annual')}
+                className={`rounded-full px-5 py-2 text-sm font-semibold transition-all ${
+                  billingCycle === 'annual' ? 'bg-[#25D366] text-white shadow-sm' : 'text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                Annual - Save 20%
+              </button>
+            </div>
+            <p className="mt-3 text-sm text-slate-500">
+              Annual pricing is already defined and can be enabled in checkout when deployment billing goes live.
+            </p>
+          </div>
+
+          <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
+            {PLAN_ORDER.map((planKey) => {
+              const plan = PLANS[planKey];
+              return (
+                <div
+                  key={planKey}
+                  className={`relative rounded-3xl border p-8 transition-all ${
+                    plan.highlight
+                      ? 'z-10 scale-[1.02] border-[#25D366] bg-white shadow-2xl'
+                      : 'border-slate-200 bg-slate-50 hover:bg-white hover:shadow-xl'
+                  }`}
+                >
+                  {plan.highlight ? (
+                    <div className="absolute -top-4 left-1/2 -translate-x-1/2 rounded-full bg-[#25D366] px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-white">
+                      Most Popular
+                    </div>
+                  ) : null}
+
+                  <div className="mb-8">
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <h3 className="mb-1 text-xl font-bold">{plan.name}</h3>
+                        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">{plan.shortLabel}</p>
+                      </div>
+                      {plan.highlight ? (
+                        <span className="rounded-full bg-[#25D366]/10 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.2em] text-[#25D366]">
+                          Best Value
+                        </span>
+                      ) : null}
+                    </div>
+                    <div className="mb-3 mt-5 flex items-baseline gap-1">
+                      <span className="text-4xl font-bold">AED {getPlanPrice(plan, billingCycle)}</span>
+                      <span className="font-medium text-slate-500">/month</span>
+                    </div>
+                    {billingCycle === 'annual' ? (
+                      <p className="text-xs font-medium text-[#128C7E]">Billed yearly at AED {plan.annualBilledPrice.toLocaleString()}</p>
+                    ) : (
+                      <p className="text-xs font-medium text-slate-500">Save 20% with annual billing</p>
+                    )}
+                    <p className="mt-4 text-sm leading-relaxed text-slate-600">{plan.description}</p>
+                  </div>
+
+                  <ul className="mb-8 space-y-4">
+                    {plan.cardHighlights.map((feature) => (
+                      <li key={feature} className="flex items-center gap-3 text-sm font-medium text-slate-700">
+                        <div className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-[#25D366]/10">
+                          <Check className="h-3 w-3 text-[#25D366]" />
+                        </div>
+                        {feature}
+                      </li>
+                    ))}
+                  </ul>
+
+                  <button
+                    onClick={() => handlePlanSelect(planKey.toLowerCase())}
+                    className={`w-full rounded-xl py-4 font-bold transition-all ${
+                      plan.highlight
+                        ? 'bg-[#25D366] text-white shadow-lg shadow-[#25D366]/20 hover:bg-[#128C7E]'
+                        : 'bg-slate-200 text-slate-900 hover:bg-slate-300'
+                    }`}
+                  >
+                    {user ? 'Choose Plan' : 'Get Started'}
+                  </button>
+                </div>
+              );
+            })}
+
+            <div className="rounded-3xl border border-slate-900/10 bg-slate-900 p-8 text-white shadow-xl">
+              <div className="mb-8">
+                <h3 className="mb-1 text-xl font-bold">{ENTERPRISE_PLAN.name}</h3>
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-white/60">{ENTERPRISE_PLAN.shortLabel}</p>
+                <div className="mt-5 flex items-baseline gap-2">
+                  <span className="text-4xl font-bold">Let's Talk</span>
+                </div>
+                <p className="mt-4 text-sm leading-relaxed text-white/75">{ENTERPRISE_PLAN.description}</p>
+              </div>
+
+              <ul className="mb-8 space-y-4">
+                {ENTERPRISE_PLAN.cardHighlights.map((feature) => (
+                  <li key={feature} className="flex items-center gap-3 text-sm font-medium text-white/90">
+                    <div className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-white/10">
+                      <Check className="h-3 w-3 text-[#86efac]" />
+                    </div>
+                    {feature}
+                  </li>
+                ))}
+              </ul>
+
+              <button
+                onClick={() => window.open('https://tawasel.io', '_blank', 'noopener,noreferrer')}
+                className="w-full rounded-xl bg-white py-4 font-bold text-slate-900 transition-all hover:bg-slate-100"
+              >
+                {ENTERPRISE_PLAN.ctaLabel}
+              </button>
+            </div>
+          </div>
+
+          <div className="mt-14 rounded-[2rem] border border-slate-200 bg-slate-50 px-8 py-10 text-center">
+            <p className="text-xl font-semibold text-slate-900">{PRICING_VALUE_STATEMENT}</p>
+            <div className="mt-5 flex flex-wrap items-center justify-center gap-3 text-sm text-slate-500">
+              {PRICING_TRUST_SIGNALS.map((signal) => (
+                <span key={signal} className="rounded-full bg-white px-4 py-2 font-medium shadow-sm">
+                  {signal}
+                </span>
+              ))}
+            </div>
+          </div>
+
+          <div className="mt-16 rounded-[2rem] border border-slate-200 bg-white p-8 shadow-sm">
+            <div className="max-w-3xl">
+              <h3 className="text-2xl font-bold text-slate-900">Compare every plan at a glance</h3>
+              <p className="mt-2 text-slate-500">
+                Review the features that actually change how your team works: channels, CRM depth, automation, analytics, and support.
+              </p>
+            </div>
+
+            <div className="mt-8 space-y-8">
+              {PRICING_COMPARISON_GROUPS.map((group) => (
+                <div key={group.title}>
+                  <h4 className="text-sm font-bold uppercase tracking-[0.2em] text-slate-400">{group.title}</h4>
+                  <div className="mt-4 overflow-x-auto">
+                    <table className="min-w-full border-separate border-spacing-y-2">
+                      <thead>
+                        <tr className="text-left text-xs uppercase tracking-[0.2em] text-slate-400">
+                          <th className="px-4 py-2">Feature</th>
+                          <th className="px-4 py-2">Starter</th>
+                          <th className="px-4 py-2">Growth</th>
+                          <th className="px-4 py-2">Pro</th>
+                          <th className="px-4 py-2">Enterprise</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {group.rows.map((row) => (
+                          <tr key={row.label} className="bg-slate-50 text-sm text-slate-700">
+                            <td className="rounded-l-2xl px-4 py-3 font-semibold text-slate-900">{row.label}</td>
+                            <td className="px-4 py-3">{formatComparisonValue(row.values.STARTER)}</td>
+                            <td className="px-4 py-3">{formatComparisonValue(row.values.GROWTH)}</td>
+                            <td className="px-4 py-3">{formatComparisonValue(row.values.PRO)}</td>
+                            <td className="rounded-r-2xl px-4 py-3">{formatComparisonValue(row.values.ENTERPRISE)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="mt-16 grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
+            <div className="rounded-[2rem] border border-slate-200 bg-white p-8 shadow-sm">
+              <h3 className="text-2xl font-bold text-slate-900">Popular add-ons</h3>
+              <p className="mt-2 text-slate-500">
+                Keep the base plan clean, then add more users, numbers, onboarding help, or campaign capacity only when you need it.
+              </p>
+              <div className="mt-6 grid gap-4 sm:grid-cols-2">
+                {PRICING_ADD_ONS.map((addon) => (
+                  <div key={addon.name} className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
+                    <p className="text-sm font-bold text-slate-900">{addon.name}</p>
+                    <p className="mt-1 text-sm font-semibold text-[#128C7E]">{addon.price}</p>
+                    <p className="mt-2 text-sm text-slate-500">{addon.description}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="rounded-[2rem] border border-slate-200 bg-white p-8 shadow-sm">
+              <h3 className="text-2xl font-bold text-slate-900">Pricing FAQ</h3>
+              <div className="mt-6 space-y-5">
+                {PRICING_FAQ.map((item) => (
+                  <div key={item.question} className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
+                    <p className="font-semibold text-slate-900">{item.question}</p>
+                    <p className="mt-2 text-sm leading-relaxed text-slate-500">{item.answer}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <footer className="bg-slate-900 py-20 text-white">
+        <div className="mx-auto grid max-w-7xl gap-12 px-4 md:grid-cols-4">
           <div className="col-span-2">
-            <div className="flex items-center gap-2 mb-6">
-              <div className="w-8 h-8 bg-[#25D366] rounded-lg flex items-center justify-center">
-                <MessageSquare className="w-5 h-5 text-white" />
+            <div className="mb-6 flex items-center gap-2">
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#25D366]">
+                <MessageSquare className="h-5 w-5 text-white" />
               </div>
               <span className="text-xl font-bold">Tawasel App</span>
             </div>
-            <p className="text-slate-400 max-w-sm mb-8">
-              {t.footer.desc}
+            <p className="mb-8 max-w-sm text-slate-400">
+              The all-in-one platform for WhatsApp-driven sales, support, CRM workflows, and performance reporting.
             </p>
             <div className="flex gap-4">
               <a
                 href="https://tawasel.io"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="w-10 h-10 rounded-full bg-slate-800 flex items-center justify-center hover:bg-[#25D366] transition-colors"
+                className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-800 transition-colors hover:bg-[#25D366]"
               >
-                <Globe className="w-5 h-5" />
+                <Globe className="h-5 w-5" />
               </a>
-              <Link to="/about" className="w-10 h-10 rounded-full bg-slate-800 flex items-center justify-center hover:bg-[#25D366] transition-colors">
-                <Users className="w-5 h-5" />
+              <Link
+                to="/about"
+                className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-800 transition-colors hover:bg-[#25D366]"
+              >
+                <Users className="h-5 w-5" />
               </Link>
             </div>
           </div>
+
           <div>
-            <h4 className="font-bold mb-6">{t.footer.product}</h4>
-            <ul className="space-y-4 text-slate-400 text-sm">
-              <li><a href="/#features" className="hover:text-white transition-colors">{t.nav.features}</a></li>
-              <li><Link to="/register" className="hover:text-white transition-colors">Integrations</Link></li>
-              <li><a href="/#pricing" className="hover:text-white transition-colors">{t.nav.pricing}</a></li>
-              <li><Link to="/changelog" className="hover:text-white transition-colors">Changelog</Link></li>
+            <h4 className="mb-6 font-bold">Product</h4>
+            <ul className="space-y-4 text-sm text-slate-400">
+              <li>
+                <a href="/#features" className="transition-colors hover:text-white">
+                  Features
+                </a>
+              </li>
+              <li>
+                <Link to="/register" className="transition-colors hover:text-white">
+                  Integrations
+                </Link>
+              </li>
+              <li>
+                <a href="/#pricing" className="transition-colors hover:text-white">
+                  Pricing
+                </a>
+              </li>
+              <li>
+                <Link to="/changelog" className="transition-colors hover:text-white">
+                  Changelog
+                </Link>
+              </li>
             </ul>
           </div>
+
           <div>
-            <h4 className="font-bold mb-6">{t.footer.company}</h4>
-            <ul className="space-y-4 text-slate-400 text-sm">
-              <li><Link to="/about" className="hover:text-white transition-colors">About Us</Link></li>
-              <li><Link to="/careers" className="hover:text-white transition-colors">Careers</Link></li>
-              <li><Link to="/privacy" className="hover:text-white transition-colors">Privacy Policy</Link></li>
-              <li><Link to="/terms" className="hover:text-white transition-colors">Terms of Service</Link></li>
+            <h4 className="mb-6 font-bold">Company</h4>
+            <ul className="space-y-4 text-sm text-slate-400">
+              <li>
+                <Link to="/about" className="transition-colors hover:text-white">
+                  About Us
+                </Link>
+              </li>
+              <li>
+                <Link to="/careers" className="transition-colors hover:text-white">
+                  Careers
+                </Link>
+              </li>
+              <li>
+                <Link to="/privacy" className="transition-colors hover:text-white">
+                  Privacy Policy
+                </Link>
+              </li>
+              <li>
+                <Link to="/terms" className="transition-colors hover:text-white">
+                  Terms of Service
+                </Link>
+              </li>
             </ul>
           </div>
         </div>
-        <div className="max-w-7xl mx-auto px-4 mt-20 pt-8 border-t border-slate-800 text-center text-slate-500 text-sm">
+
+        <div className="mx-auto mt-20 max-w-7xl border-t border-slate-800 px-4 pt-8 text-center text-sm text-slate-500">
           <p className="mb-2">(c) {new Date().getFullYear()} Tawasel App. All rights reserved.</p>
-          <p>{t.footer.created} <a href="https://tawasel.io" target="_blank" rel="noopener noreferrer" className="text-[#25D366] hover:underline font-medium">tawasel.io</a></p>
+          <p>
+            Created by{' '}
+            <a href="https://tawasel.io" target="_blank" rel="noopener noreferrer" className="font-medium text-[#25D366] hover:underline">
+              tawasel.io
+            </a>
+          </p>
         </div>
       </footer>
     </div>

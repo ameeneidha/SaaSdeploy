@@ -3,13 +3,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import axios from 'axios';
 import { Check, Loader2, Lock, Mail, User } from 'lucide-react';
 import { useApp } from '../contexts/AppContext';
-import { PLANS, PlanType } from '../constants/plans';
-
-const planDescriptions: Record<PlanType, string> = {
-  STARTER: 'Best for getting started with one WhatsApp number and one AI bot.',
-  GROWTH: 'Built for growing teams that need more automation and seats.',
-  PRO: 'Made for larger operations that need advanced capacity and support.',
-};
+import { formatLimitValue, getPlanPrice, PLANS, PlanType, type BillingCycle } from '../constants/plans';
 
 export default function Register() {
   const { user, setUser } = useApp();
@@ -20,6 +14,10 @@ export default function Register() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [billingCycle] = useState<BillingCycle>(() => {
+    const stored = sessionStorage.getItem('pendingBillingCycle');
+    return stored === 'annual' ? 'annual' : 'monthly';
+  });
 
   const selectedPlan = (searchParams.get('plan') || sessionStorage.getItem('pendingPlan') || 'starter').toUpperCase() as PlanType;
   const plan = PLANS[selectedPlan];
@@ -64,50 +62,63 @@ export default function Register() {
             Selected plan
           </div>
           <h1 className="mt-6 text-4xl font-bold tracking-tight">{plan.name}</h1>
-          <p className="mt-3 max-w-xl text-base text-slate-300">{planDescriptions[selectedPlan]}</p>
+          <p className="mt-3 max-w-xl text-base text-slate-300">{plan.description}</p>
           <div className="mt-8 flex items-end gap-2">
-            <span className="text-5xl font-bold">AED {plan.price}</span>
+            <span className="text-5xl font-bold">AED {getPlanPrice(plan, billingCycle)}</span>
             <span className="pb-2 text-slate-400">/ month</span>
           </div>
+          <p className="mt-2 text-sm text-[#86efac]">
+            {billingCycle === 'annual'
+              ? `Annual pricing selected - billed AED ${plan.annualBilledPrice.toLocaleString()} yearly`
+              : 'Monthly pricing selected'}
+          </p>
 
           <div className="mt-10 space-y-4 rounded-3xl border border-white/10 bg-white/5 p-6">
             <div className="flex items-center justify-between text-sm text-slate-300">
-              <span>WhatsApp numbers</span>
-              <span>{plan.whatsappLimit}</span>
+              <span>Audience</span>
+              <span className="max-w-[220px] text-right text-xs text-slate-400">{plan.shortLabel}</span>
             </div>
             <div className="flex items-center justify-between text-sm text-slate-300">
-              <span>Instagram accounts</span>
-              <span>{plan.instagramLimit}</span>
+              <span>Contacts included</span>
+              <span>{formatLimitValue(plan.contactsLimit)}</span>
             </div>
             <div className="flex items-center justify-between text-sm text-slate-300">
-              <span>AI chatbots</span>
-              <span>{plan.chatbotLimit}</span>
+              <span>Broadcasts / month</span>
+              <span>{formatLimitValue(plan.broadcastLimit)}</span>
             </div>
             <div className="flex items-center justify-between text-sm text-slate-300">
               <span>Team members</span>
-              <span>{plan.userLimit}</span>
+              <span>{formatLimitValue(plan.userLimit)}</span>
+            </div>
+            <div className="flex items-center justify-between text-sm text-slate-300">
+              <span>WhatsApp numbers</span>
+              <span>{formatLimitValue(plan.whatsappLimit)}</span>
+            </div>
+            <div className="flex items-center justify-between text-sm text-slate-300">
+              <span>AI assistants</span>
+              <span>{formatLimitValue(plan.chatbotLimit)}</span>
+            </div>
+            <div className="flex items-center justify-between text-sm text-slate-300">
+              <span>Conversation history</span>
+              <span>{plan.historyMonths} months</span>
             </div>
           </div>
 
           <ul className="mt-10 space-y-4">
-            <li className="flex items-center gap-3 text-sm text-slate-200">
-              <Check className="h-4 w-4 text-[#86efac]" />
-              Account and workspace are created automatically
-            </li>
-            <li className="flex items-center gap-3 text-sm text-slate-200">
-              <Check className="h-4 w-4 text-[#86efac]" />
-              Verify your email first, then unlock billing and choose this plan
-            </li>
-            <li className="flex items-center gap-3 text-sm text-slate-200">
-              <Check className="h-4 w-4 text-[#86efac]" />
-              Dashboard opens in restricted mode until payment is completed
-            </li>
+            {plan.valueProps.map((item) => (
+              <li key={item} className="flex items-center gap-3 text-sm text-slate-200">
+                <Check className="h-4 w-4 text-[#86efac]" />
+                {item}
+              </li>
+            ))}
           </ul>
         </section>
 
         <section className="rounded-[2rem] border border-slate-200 bg-white p-8 shadow-sm lg:p-10">
           <h2 className="text-3xl font-bold tracking-tight text-slate-900">Create your account</h2>
-          <p className="mt-2 text-sm text-slate-500">Create your account, verify your email, then choose and pay for your {plan.name} plan from billing.</p>
+            <p className="mt-2 text-sm text-slate-500">
+              Create your account, verify your email, then continue to billing to activate the {plan.name} package for your workspace.
+            </p>
 
           <form onSubmit={handleSubmit} className="mt-8 space-y-5">
             <div className="space-y-2">
