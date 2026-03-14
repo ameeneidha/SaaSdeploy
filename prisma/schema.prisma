@@ -301,7 +301,6 @@ model Chatbot {
   id            String    @id @default(cuid())
   name          String
   instructions  String
-  model         String    @default("gpt-4o-mini")
   enabled       Boolean   @default(true)
   language      String    @default("en")
   workspaceId   String

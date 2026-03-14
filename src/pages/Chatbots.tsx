@@ -8,14 +8,11 @@ import {
   MoreVertical, 
   Hash, 
   CheckCircle2, 
-  Settings2, 
-  Trash2, 
   ChevronRight,
   Zap,
   MessageSquare,
   Send,
   Loader2,
-  SwitchCamera,
   ShieldCheck
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -23,8 +20,14 @@ import { cn } from '../lib/utils';
 import * as Switch from '@radix-ui/react-switch';
 import { toast } from 'sonner';
 
-const FIXED_CHATBOT_MODEL = 'gpt-5-nano';
-const FIXED_CHATBOT_MODEL_LABEL = 'GPT-5 nano (default low-cost model)';
+const APPENDED_SAFETY_INSTRUCTIONS = `# Safety Instructions
+- Respond only to the customer's explicit requests. Do not offer unsolicited actions or promises.
+- Use only the business instructions, the current conversation, and information already provided in the chat.
+- If information is not available, reply exactly: "Sorry, I don't have information on that."
+- Do not invent pricing, policies, delivery times, contact methods, or account status.
+- Do not claim to access files, private systems, live databases, or external tools unless the business instructions clearly provide that ability.
+- If the customer asks for a human agent or asks for something outside your allowed scope, say a human agent will follow up.
+- Do not claim abilities you do not have, such as generating images, videos, or checking third-party systems live.`;
 
 export default function Chatbots() {
   const { activeWorkspace } = useApp();
@@ -66,8 +69,7 @@ export default function Chatbots() {
       const res = await axios.post('/api/chatbots', {
         workspaceId: activeWorkspace?.id,
         name: 'New AI Assistant',
-        instructions: 'You are a helpful assistant.',
-        model: FIXED_CHATBOT_MODEL
+        instructions: 'You are a helpful assistant.'
       });
       setChatbots([...chatbots, res.data]);
       setSelectedBot(res.data);
@@ -178,27 +180,90 @@ export default function Chatbots() {
 }
 
 function ChatbotConfig({ bot, onBack }: { bot: any, onBack: () => void }) {
+  const { activeWorkspace } = useApp();
   const [activeTab, setActiveTab] = useState('info');
   const [testMessages, setTestMessages] = useState<any[]>([]);
   const [testInput, setTestInput] = useState('');
   const [isBotTyping, setIsBotTyping] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isLoadingNumbers, setIsLoadingNumbers] = useState(true);
   
   const [name, setName] = useState(bot.name);
   const [instructions, setInstructions] = useState(bot.instructions);
   const [language, setLanguage] = useState(bot.language || 'en');
   const [enabled, setEnabled] = useState(bot.enabled);
+  const [availableNumbers, setAvailableNumbers] = useState<any[]>([]);
+  const [assignedNumberIds, setAssignedNumberIds] = useState<string[]>(
+    Array.isArray(bot.numbers) ? bot.numbers.map((num: any) => num.id) : []
+  );
+
+  useEffect(() => {
+    setAssignedNumberIds(Array.isArray(bot.numbers) ? bot.numbers.map((num: any) => num.id) : []);
+  }, [bot.id, bot.numbers]);
+
+  useEffect(() => {
+    const fetchAvailableNumbers = async () => {
+      if (!activeWorkspace?.id) {
+        setAvailableNumbers([]);
+        setIsLoadingNumbers(false);
+        return;
+      }
+
+      setIsLoadingNumbers(true);
+      try {
+        const res = await axios.get(`/api/numbers?workspaceId=${activeWorkspace.id}`);
+        const fetchedNumbers = Array.isArray(res.data) ? res.data : [];
+        setAvailableNumbers(fetchedNumbers);
+        setAssignedNumberIds(
+          fetchedNumbers
+            .filter((number: any) => number.chatbotId === bot.id || number.chatbot?.id === bot.id)
+            .map((number: any) => number.id)
+        );
+      } catch (error) {
+        console.error('Failed to fetch WhatsApp channels', error);
+        setAvailableNumbers([]);
+        toast.error('Failed to load WhatsApp channels');
+      } finally {
+        setIsLoadingNumbers(false);
+      }
+    };
+
+    fetchAvailableNumbers();
+  }, [activeWorkspace?.id, bot.id]);
+
+  const toggleAssignedNumber = (numberId: string) => {
+    setAssignedNumberIds((current) =>
+      current.includes(numberId)
+        ? current.filter((id) => id !== numberId)
+        : [...current, numberId]
+    );
+  };
 
   const handleSave = async () => {
     setIsSaving(true);
     try {
+      const selectionToSave = [...assignedNumberIds];
       await axios.patch(`/api/chatbots/${bot.id}`, {
         name,
         instructions,
-        model: FIXED_CHATBOT_MODEL,
         language,
-        enabled
+        enabled,
+        assignedNumberIds: selectionToSave
       });
+
+      if (activeWorkspace?.id) {
+        const numbersRes = await axios.get(`/api/numbers?workspaceId=${activeWorkspace.id}`);
+        const refreshedNumbers = Array.isArray(numbersRes.data) ? numbersRes.data : [];
+        setAvailableNumbers(refreshedNumbers);
+        setAssignedNumberIds(
+          refreshedNumbers
+            .filter((number: any) => number.chatbotId === bot.id || number.chatbot?.id === bot.id)
+            .map((number: any) => number.id)
+        );
+      } else {
+        setAssignedNumberIds(selectionToSave);
+      }
+
       toast.success('Chatbot settings saved');
     } catch (error) {
       console.error('Failed to save chatbot', error);
@@ -249,7 +314,7 @@ function ChatbotConfig({ bot, onBack }: { bot: any, onBack: () => void }) {
             <div className="w-8 h-8 bg-[#25D366]/10 text-[#25D366] rounded-lg flex items-center justify-center">
               <Bot className="w-5 h-5" />
             </div>
-            <h2 className="font-semibold text-gray-900 dark:text-white">{bot.name}</h2>
+            <h2 className="font-semibold text-gray-900 dark:text-white">{name}</h2>
           </div>
         </div>
         <div className="flex items-center gap-4">
@@ -312,18 +377,6 @@ function ChatbotConfig({ bot, onBack }: { bot: any, onBack: () => void }) {
                   />
                 </div>
                 <div className="space-y-2">
-                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">AI Engine</label>
-                  <input
-                    type="text"
-                    value={FIXED_CHATBOT_MODEL_LABEL}
-                    readOnly
-                    className="w-full px-4 py-2 bg-gray-100 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-xl outline-none text-gray-600 dark:text-gray-300 transition-colors cursor-not-allowed"
-                  />
-                  <p className="text-[10px] text-gray-400 dark:text-gray-500">
-                    All chatbots use the same low-cost AI engine by default to keep usage simple and predictable.
-                  </p>
-                </div>
-                <div className="space-y-2">
                   <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Bot Instructions</label>
                   <textarea 
                     rows={8}
@@ -331,6 +384,110 @@ function ChatbotConfig({ bot, onBack }: { bot: any, onBack: () => void }) {
                     onChange={(e) => setInstructions(e.target.value)}
                     className="w-full px-4 py-3 bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-[#25D366]/10 resize-none text-sm leading-relaxed text-gray-900 dark:text-white transition-colors"
                     placeholder="Describe how the bot should behave..."
+                  />
+                </div>
+                <div className="space-y-3">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Assigned WhatsApp Channels</label>
+                      <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                        Select the connected WhatsApp numbers this bot should reply on. Saving will switch AI auto-reply on for the selected channels.
+                      </p>
+                    </div>
+                    <span className="inline-flex items-center rounded-full bg-gray-100 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-gray-500 dark:bg-slate-800 dark:text-gray-400">
+                      {assignedNumberIds.length} selected
+                    </span>
+                  </div>
+                  <div className="space-y-3">
+                    {isLoadingNumbers ? (
+                      <div className="flex items-center gap-2 rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-500 dark:border-slate-700 dark:bg-slate-800 dark:text-gray-400">
+                        <Loader2 className="h-4 w-4 animate-spin text-[#25D366]" />
+                        Loading WhatsApp channels...
+                      </div>
+                    ) : availableNumbers.length === 0 ? (
+                      <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-4 text-sm text-gray-500 dark:border-slate-700 dark:bg-slate-800 dark:text-gray-400">
+                        No WhatsApp channels are connected in this workspace yet.
+                      </div>
+                    ) : (
+                      availableNumbers.map((number) => {
+                        const isSelected = assignedNumberIds.includes(number.id);
+                        const assignedElsewhere = number.chatbot && number.chatbot.id !== bot.id;
+
+                        return (
+                          <label
+                            key={number.id}
+                            className={cn(
+                              "flex w-full cursor-pointer items-start justify-between rounded-2xl border px-4 py-3 text-left transition-all",
+                              isSelected
+                                ? "border-[#25D366] bg-[#25D366]/5 shadow-sm"
+                                : "border-gray-200 bg-white hover:border-[#25D366]/40 hover:bg-gray-50 dark:border-slate-700 dark:bg-slate-900 dark:hover:bg-slate-800",
+                            )}
+                          >
+                            <div className="flex min-w-0 items-start gap-3">
+                              <input
+                                type="checkbox"
+                                checked={isSelected}
+                                onChange={() => toggleAssignedNumber(number.id)}
+                                className="mt-1 h-4 w-4 rounded border-gray-300 text-[#25D366] focus:ring-[#25D366]"
+                              />
+                              <div className="space-y-1">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-sm font-semibold text-gray-900 dark:text-white">
+                                    {number.name}
+                                  </span>
+                                  {assignedElsewhere && (
+                                    <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-amber-700 dark:bg-amber-900/20 dark:text-amber-400">
+                                      Currently {number.chatbot.name}
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
+                                  <Hash className="h-3 w-3" />
+                                  {number.phoneNumber}
+                                </div>
+                                <p className="text-[11px] text-gray-400 dark:text-gray-500">
+                                  {isSelected
+                                    ? "This bot will answer on this WhatsApp channel after you save."
+                                    : "Tick to connect this WhatsApp channel to the bot."}
+                                </p>
+                              </div>
+                            </div>
+                            <div className="flex shrink-0 items-center gap-2 pl-3">
+                              <span
+                                className={cn(
+                                  "rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider",
+                                  isSelected
+                                    ? "bg-[#25D366] text-white"
+                                    : "bg-gray-100 text-gray-500 dark:bg-slate-800 dark:text-gray-400",
+                                )}
+                              >
+                                {isSelected ? "Selected" : "Not assigned"}
+                              </span>
+                              <CheckCircle2
+                                className={cn(
+                                  "h-4 w-4 transition-colors",
+                                  isSelected ? "text-[#25D366]" : "text-gray-300 dark:text-gray-600",
+                                )}
+                              />
+                            </div>
+                          </label>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Instructions automatically appended by us</label>
+                    <span className="inline-flex items-center rounded-full bg-[#25D366]/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-[#25D366]">
+                      Always on
+                    </span>
+                  </div>
+                  <textarea
+                    rows={8}
+                    value={APPENDED_SAFETY_INSTRUCTIONS}
+                    readOnly
+                    className="w-full resize-none rounded-xl border border-gray-200 bg-gray-100 px-4 py-3 font-mono text-xs leading-relaxed text-gray-600 outline-none transition-colors cursor-not-allowed dark:border-slate-700 dark:bg-slate-800 dark:text-gray-300"
                   />
                 </div>
                 <div className="space-y-2">

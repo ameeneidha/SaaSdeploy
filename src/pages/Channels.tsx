@@ -409,9 +409,9 @@ export default function Channels() {
                           <Bot className="w-4 h-4 text-pink-600 dark:text-pink-400" />
                           <span className="text-xs font-medium text-gray-700 dark:text-gray-300">AI Chatbot</span>
                         </div>
-                        <span className="px-2 py-1 bg-pink-50 dark:bg-pink-900/20 text-pink-600 dark:text-pink-400 text-[10px] font-bold rounded uppercase">
-                          {acc.chatbots?.[0]?.name || 'Enabled'}
-                        </span>
+                          <span className="px-2 py-1 bg-pink-50 dark:bg-pink-900/20 text-pink-600 dark:text-pink-400 text-[10px] font-bold rounded uppercase">
+                          {acc.chatbot?.name || 'Enabled'}
+                          </span>
                       </div>
                     </div>
 

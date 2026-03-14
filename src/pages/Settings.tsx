@@ -698,9 +698,9 @@ function Billing() {
                   <span className="text-4xl font-bold text-gray-900 dark:text-white">{formatCreditValue(billingSummary.balance)}</span>
                   <span className="text-sm font-medium text-gray-400 dark:text-gray-500 uppercase">Credits</span>
                 </div>
-                <p className="text-[10px] text-gray-400 dark:text-gray-500 mb-6 leading-relaxed">
-                  GPT-5 nano usage now creates real debit entries from token consumption. The balance below is calculated from your workspace ledger, while WhatsApp conversation charges stay on your own WABA billing.
-                </p>
+                  <p className="text-[10px] text-gray-400 dark:text-gray-500 mb-6 leading-relaxed">
+                    GPT-4.1 mini usage now creates real debit entries from token consumption. The balance below is calculated from your workspace ledger, while WhatsApp conversation charges stay on your own WABA billing.
+                  </p>
                 <div className="grid grid-cols-2 gap-3 mb-6">
                   <div className="rounded-xl bg-slate-50 px-4 py-3 dark:bg-slate-800/60">
                     <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500">AI Spend</p>
@@ -861,7 +861,7 @@ function Billing() {
                   <tr key={entry.id} className="hover:bg-gray-50/50 dark:hover:bg-slate-800/50 transition-colors">
                     <td className="px-6 py-4 text-xs text-gray-500 dark:text-gray-400">{format(new Date(entry.createdAt), 'MMM dd, yyyy HH:mm')}</td>
                     <td className="px-6 py-4 text-sm font-medium text-gray-900 dark:text-white">
-                      {entry.type === 'AI_TOKEN' ? 'GPT-5 nano token usage' : entry.type}
+                      {entry.type === 'AI_TOKEN' ? 'GPT-4.1 mini token usage' : entry.type}
                     </td>
                     <td className="px-6 py-4 text-sm text-gray-600 dark:text-gray-300">
                       {Number(entry.quantity || 0).toLocaleString()}

@@ -18,10 +18,18 @@ import crypto from 'crypto';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const FIXED_CHATBOT_MODEL = "gpt-5-nano";
-const GPT_5_NANO_INPUT_COST_PER_1M = 0.05;
-const GPT_5_NANO_CACHED_INPUT_COST_PER_1M = 0.005;
-const GPT_5_NANO_OUTPUT_COST_PER_1M = 0.4;
+const FIXED_CHATBOT_MODEL = "gpt-4.1-mini";
+const GPT_4_1_MINI_INPUT_COST_PER_1M = 0.4;
+const GPT_4_1_MINI_CACHED_INPUT_COST_PER_1M = 0.1;
+const GPT_4_1_MINI_OUTPUT_COST_PER_1M = 1.6;
+const APPENDED_CHATBOT_SAFETY_INSTRUCTIONS = `# Safety Instructions
+- Respond only to the customer's explicit requests. Do not offer unsolicited actions or promises.
+- Use only the business instructions, the current conversation, and information already provided in the chat.
+- If information is not available, reply exactly: "Sorry, I don't have information on that."
+- Do not invent pricing, policies, delivery times, contact methods, or account status.
+- Do not claim to access files, private systems, live databases, or external tools unless the business instructions clearly provide that ability.
+- If the customer asks for a human agent or asks for something outside your allowed scope, say a human agent will follow up.
+- Do not claim abilities you do not have, such as generating images, videos, or checking third-party systems live.`;
 
 const stripe = process.env.STRIPE_SECRET_KEY ? new Stripe(process.env.STRIPE_SECRET_KEY) : null;
 const openai = process.env.OPENAI_API_KEY ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY }) : null;
@@ -158,6 +166,16 @@ const createSecureToken = () => {
   const token = crypto.randomBytes(32).toString('hex');
   const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
   return { token, tokenHash };
+};
+
+const getInstagramContactFallbackName = (instagramId?: string | null) => {
+  const normalized = String(instagramId || '').trim();
+  if (!normalized) {
+    return 'Instagram User';
+  }
+
+  const suffix = normalized.slice(-4);
+  return suffix ? `Instagram User ${suffix}` : 'Instagram User';
 };
 
 const hashSecureToken = (token: string) =>
@@ -475,10 +493,13 @@ const buildIncomingWhatsAppMessagePayload = (message: any): IncomingWhatsAppMess
 async function getAIResponse(chatbot: any, message: string) {
   try {
     if (openai) {
+      const systemPrompt = [chatbot.instructions?.trim(), APPENDED_CHATBOT_SAFETY_INSTRUCTIONS]
+        .filter(Boolean)
+        .join("\n\n");
       const completion = await openai.chat.completions.create({
         model: FIXED_CHATBOT_MODEL,
         messages: [
-          { role: "system", content: chatbot.instructions },
+          { role: "system", content: systemPrompt },
           { role: "user", content: message }
         ],
       });
@@ -605,12 +626,12 @@ const getOpenAIUsageBreakdown = (usage: any) => {
   };
 };
 
-const calculateGpt5NanoCostUsd = (usage: any) => {
+const calculateGpt41MiniCostUsd = (usage: any) => {
   const breakdown = getOpenAIUsageBreakdown(usage);
 
-  const inputCost = (breakdown.billablePromptTokens / 1_000_000) * GPT_5_NANO_INPUT_COST_PER_1M;
-  const cachedInputCost = (breakdown.cachedPromptTokens / 1_000_000) * GPT_5_NANO_CACHED_INPUT_COST_PER_1M;
-  const outputCost = (breakdown.completionTokens / 1_000_000) * GPT_5_NANO_OUTPUT_COST_PER_1M;
+  const inputCost = (breakdown.billablePromptTokens / 1_000_000) * GPT_4_1_MINI_INPUT_COST_PER_1M;
+  const cachedInputCost = (breakdown.cachedPromptTokens / 1_000_000) * GPT_4_1_MINI_CACHED_INPUT_COST_PER_1M;
+  const outputCost = (breakdown.completionTokens / 1_000_000) * GPT_4_1_MINI_OUTPUT_COST_PER_1M;
 
   return {
     ...breakdown,
@@ -629,7 +650,7 @@ async function recordAiUsage(
 ) {
   if (!workspaceId) return null;
 
-  const costBreakdown = calculateGpt5NanoCostUsd(usage);
+  const costBreakdown = calculateGpt41MiniCostUsd(usage);
   if (costBreakdown.totalTokens <= 0) return null;
 
   const roundedCost = roundBillingAmount(costBreakdown.totalCost);
@@ -1883,19 +1904,27 @@ async function startServer() {
 
   const verifyMetaSignature = (req: any) => {
     const signature = String(req.headers['x-hub-signature-256'] || '').trim();
-    const appSecret = String(process.env.META_APP_SECRET || '').trim();
     const rawBody = String(req.rawBody || '');
+    const appSecrets = Array.from(
+      new Set(
+        [process.env.META_APP_SECRET, process.env.INSTAGRAM_APP_SECRET]
+          .map((value) => String(value || '').trim())
+          .filter(Boolean)
+      )
+    );
 
-    if (!signature || !appSecret || !rawBody) {
+    if (!signature || !rawBody || appSecrets.length === 0) {
       return false;
     }
 
-    const expected = `sha256=${crypto.createHmac('sha256', appSecret).update(rawBody).digest('hex')}`;
-    if (signature.length !== expected.length) {
-      return false;
-    }
+    return appSecrets.some((appSecret) => {
+      const expected = `sha256=${crypto.createHmac('sha256', appSecret).update(rawBody).digest('hex')}`;
+      if (signature.length !== expected.length) {
+        return false;
+      }
 
-    return crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected));
+      return crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected));
+    });
   };
 
   const resolveContactListIds = async (workspaceId: string, listIds?: string[], listNames?: string[]) => {
@@ -2719,30 +2748,51 @@ async function startServer() {
 
           // Trigger AI Chatbot if enabled
           if (!conversation.aiPaused && number.autoReply && number.chatbotId && incomingPayload.aiInput) {
-            const chatbot = await prisma.chatbot.findUnique({ where: { id: number.chatbotId } });
+            const chatbot = await prisma.chatbot.findFirst({
+              where: {
+                id: number.chatbotId,
+                workspaceId: number.workspaceId,
+              }
+            });
             if (chatbot && chatbot.enabled) {
               const aiResponse = await getAIResponse(chatbot, incomingPayload.aiInput);
               if (aiResponse) {
                 const whatsAppConfig = getWhatsAppChannelConfig(number);
-                // Send back to WhatsApp
-                await sendMetaMessage(from, aiResponse, 'whatsapp', {
-                  accessToken: whatsAppConfig.accessToken,
-                  phoneNumberId: whatsAppConfig.phoneNumberId || phoneNumberId
-                });
+                try {
+                  // Send back to WhatsApp
+                  await sendMetaMessage(from, aiResponse, 'whatsapp', {
+                    accessToken: whatsAppConfig.accessToken,
+                    phoneNumberId: whatsAppConfig.phoneNumberId || phoneNumberId
+                  });
 
-                // Save AI message
-                const aiMsg = await prisma.message.create({
-                  data: {
-                    conversationId: conversation.id,
-                    content: aiResponse,
-                    direction: 'OUTGOING',
-                    senderType: 'AI_BOT',
-                    senderName: chatbot.name,
-                    status: 'SENT'
-                  }
-                });
+                  // Save AI message
+                  const aiMsg = await prisma.message.create({
+                    data: {
+                      conversationId: conversation.id,
+                      content: aiResponse,
+                      direction: 'OUTGOING',
+                      senderType: 'AI_BOT',
+                      senderName: chatbot.name,
+                      status: 'SENT'
+                    }
+                  });
 
-                io.to(number.workspaceId).emit("new-message", aiMsg);
+                  io.to(number.workspaceId).emit("new-message", aiMsg);
+                } catch (error: any) {
+                  console.error("WhatsApp AI auto-reply failed:", error?.message || error);
+                  const failedAiMsg = await prisma.message.create({
+                    data: {
+                      conversationId: conversation.id,
+                      content: aiResponse,
+                      direction: 'OUTGOING',
+                      senderType: 'AI_BOT',
+                      senderName: chatbot.name,
+                      status: 'FAILED'
+                    }
+                  });
+
+                  io.to(number.workspaceId).emit("new-message", failedAiMsg);
+                }
               }
             }
           }
@@ -2778,6 +2828,7 @@ async function startServer() {
           if (!contact) {
             contact = await prisma.contact.create({
               data: {
+                name: getInstagramContactFallbackName(senderId),
                 instagramId: senderId,
                 workspaceId: account.workspaceId,
                 lastActivityAt: new Date(),
@@ -2787,6 +2838,7 @@ async function startServer() {
             contact = await prisma.contact.update({
               where: { id: contact.id },
               data: {
+                name: contact.name?.trim() ? contact.name : getInstagramContactFallbackName(senderId),
                 lastActivityAt: new Date(),
               },
             });
@@ -2830,30 +2882,51 @@ async function startServer() {
           io.to(account.workspaceId).emit("conversation-updated", conversation.id);
 
           // Trigger AI Chatbot if enabled
-            if (!conversation.aiPaused && account.chatbotId) {
-            const chatbot = await prisma.chatbot.findUnique({ where: { id: account.chatbotId } });
+          if (!conversation.aiPaused && account.chatbotId) {
+            const chatbot = await prisma.chatbot.findFirst({
+              where: {
+                id: account.chatbotId,
+                workspaceId: account.workspaceId,
+              }
+            });
             if (chatbot && chatbot.enabled) {
               const aiResponse = await getAIResponse(chatbot, text);
               if (aiResponse) {
-                // Send back to Instagram
-                await sendMetaMessage(senderId, aiResponse, 'instagram', {
-                  accessToken: account.accessToken || process.env.META_ACCESS_TOKEN || "",
-                  instagramId: recipientId
-                });
+                try {
+                  // Send back to Instagram
+                  await sendMetaMessage(senderId, aiResponse, 'instagram', {
+                    accessToken: account.accessToken || process.env.INSTAGRAM_ACCESS_TOKEN || process.env.META_ACCESS_TOKEN || "",
+                    instagramId: recipientId
+                  });
 
-                // Save AI message
-                const aiMsg = await prisma.message.create({
-                  data: {
-                    conversationId: conversation.id,
-                    content: aiResponse,
-                    direction: 'OUTGOING',
-                    senderType: 'AI_BOT',
-                    senderName: chatbot.name,
-                    status: 'SENT'
-                  }
-                });
+                  // Save AI message
+                  const aiMsg = await prisma.message.create({
+                    data: {
+                      conversationId: conversation.id,
+                      content: aiResponse,
+                      direction: 'OUTGOING',
+                      senderType: 'AI_BOT',
+                      senderName: chatbot.name,
+                      status: 'SENT'
+                    }
+                  });
 
-                io.to(account.workspaceId).emit("new-message", aiMsg);
+                  io.to(account.workspaceId).emit("new-message", aiMsg);
+                } catch (error: any) {
+                  console.error("Instagram AI auto-reply failed:", error?.message || error);
+                  const failedAiMsg = await prisma.message.create({
+                    data: {
+                      conversationId: conversation.id,
+                      content: aiResponse,
+                      direction: 'OUTGOING',
+                      senderType: 'AI_BOT',
+                      senderName: chatbot.name,
+                      status: 'FAILED'
+                    }
+                  });
+
+                  io.to(account.workspaceId).emit("new-message", failedAiMsg);
+                }
               }
             }
           }
@@ -3368,7 +3441,7 @@ async function startServer() {
 
       const accessToken =
         message.conversation.channelType === 'INSTAGRAM'
-          ? message.conversation.instagramAccount?.accessToken || process.env.META_ACCESS_TOKEN || ""
+        ? message.conversation.instagramAccount?.accessToken || process.env.INSTAGRAM_ACCESS_TOKEN || process.env.META_ACCESS_TOKEN || ""
           : getWhatsAppChannelConfig(message.conversation.number).accessToken;
 
       if (!accessToken) {
@@ -3659,9 +3732,9 @@ async function startServer() {
             return res.status(400).json({ error: "Instagram attachments are not connected yet. Send text only for now." });
           }
           await sendMetaMessage(conversation.contact.instagramId, content, 'instagram', {
-            accessToken: conversation.instagramAccount?.accessToken || process.env.META_ACCESS_TOKEN || "",
-            instagramId: conversation.instagramAccount?.instagramId
-          });
+        accessToken: conversation.instagramAccount?.accessToken || process.env.INSTAGRAM_ACCESS_TOKEN || process.env.META_ACCESS_TOKEN || "",
+        instagramId: conversation.instagramAccount?.instagramId
+      });
         }
       }
 
@@ -3799,12 +3872,11 @@ async function startServer() {
     if (!(await enforceWorkspacePlanLimit(res, workspaceId, 'chatbots'))) {
       return;
     }
-    const chatbot = await prisma.chatbot.create({
+      const chatbot = await prisma.chatbot.create({
       data: {
         workspaceId,
         name,
         instructions,
-        model: FIXED_CHATBOT_MODEL,
         enabled: true
       },
       include: { numbers: true, instagramAccounts: true, tools: true }
@@ -3816,18 +3888,83 @@ async function startServer() {
     const chatbot = await prisma.chatbot.findUnique({ where: { id: req.params.id } });
     return requireSubscribedWorkspaceById(req, res, next, chatbot?.workspaceId);
   }, async (req, res) => {
-    const { name, instructions, enabled, language } = req.body;
-    const chatbot = await prisma.chatbot.update({
+    const { name, instructions, enabled, language, assignedNumberIds } = req.body;
+    const existingChatbot = await prisma.chatbot.findUnique({
       where: { id: req.params.id },
-      data: {
-        name,
-        instructions,
-        model: FIXED_CHATBOT_MODEL,
-        enabled,
-        language
-      },
-      include: { numbers: true, instagramAccounts: true, tools: true }
+      include: { numbers: true }
     });
+
+    if (!existingChatbot) {
+      return res.status(404).json({ error: "Chatbot not found" });
+    }
+
+    const normalizedAssignedNumberIds = assignedNumberIds === undefined
+      ? existingChatbot.numbers.map((number) => number.id)
+      : Array.from(
+          new Set(
+            (Array.isArray(assignedNumberIds) ? assignedNumberIds : [])
+              .filter((value): value is string => typeof value === "string")
+              .map((value) => value.trim())
+              .filter(Boolean)
+          )
+        );
+
+    if (normalizedAssignedNumberIds.length > 0) {
+      const numbersInWorkspace = await prisma.whatsAppNumber.findMany({
+        where: {
+          id: { in: normalizedAssignedNumberIds },
+          workspaceId: existingChatbot.workspaceId,
+        },
+        select: { id: true },
+      });
+
+      if (numbersInWorkspace.length !== normalizedAssignedNumberIds.length) {
+        return res.status(400).json({ error: "One or more selected WhatsApp channels are invalid." });
+      }
+    }
+
+    const chatbot = await prisma.$transaction(async (tx) => {
+      await tx.chatbot.update({
+        where: { id: req.params.id },
+        data: {
+          name,
+          instructions,
+          enabled,
+          language
+        }
+      });
+
+      await tx.whatsAppNumber.updateMany({
+        where: {
+          workspaceId: existingChatbot.workspaceId,
+          chatbotId: req.params.id,
+          id: { notIn: normalizedAssignedNumberIds }
+        },
+        data: {
+          chatbotId: null,
+          autoReply: false
+        }
+      });
+
+      if (normalizedAssignedNumberIds.length > 0) {
+        await tx.whatsAppNumber.updateMany({
+          where: {
+            workspaceId: existingChatbot.workspaceId,
+            id: { in: normalizedAssignedNumberIds }
+          },
+          data: {
+            chatbotId: req.params.id,
+            autoReply: true
+          }
+        });
+      }
+
+      return tx.chatbot.findUnique({
+        where: { id: req.params.id },
+        include: { numbers: true, instagramAccounts: true, tools: true }
+      });
+    });
+
     res.json(chatbot);
   });
 

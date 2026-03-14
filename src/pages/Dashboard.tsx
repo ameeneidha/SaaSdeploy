@@ -15,6 +15,7 @@ import {
   Users,
   Wallet,
 } from 'lucide-react';
+import { toast } from 'sonner';
 import { useApp } from '../contexts/AppContext';
 import { cn } from '../lib/utils';
 
@@ -179,6 +180,7 @@ export default function Dashboard() {
     if (!activeWorkspace) return;
     if (mode === 'load') setIsLoading(true);
     if (mode === 'refresh') setIsRefreshing(true);
+    const refreshStartedAt = mode === 'refresh' ? Date.now() : 0;
 
     try {
       const response = await axios.get('/api/dashboard/summary', {
@@ -194,8 +196,18 @@ export default function Dashboard() {
         },
       });
       setSummary(response.data);
+      if (mode === 'refresh') {
+        const elapsed = Date.now() - refreshStartedAt;
+        if (elapsed < 350) {
+          await new Promise((resolve) => setTimeout(resolve, 350 - elapsed));
+        }
+        toast.success('Dashboard refreshed');
+      }
     } catch (error) {
       console.error('Failed to load dashboard summary', error);
+      if (mode === 'refresh') {
+        toast.error('Could not refresh the dashboard');
+      }
     } finally {
       setIsLoading(false);
       setIsRefreshing(false);
@@ -237,7 +249,7 @@ export default function Dashboard() {
     <div className="h-full overflow-y-auto bg-[#F8F9FA] dark:bg-slate-950 transition-colors">
       <div className="max-w-[1600px] mx-auto p-8">
         <div className="flex flex-col gap-6">
-          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+          <div className="relative z-20 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div>
               <div className="flex items-center gap-2 text-[#25D366] mb-1">
                 <Gauge className="w-5 h-5" />
@@ -250,11 +262,14 @@ export default function Dashboard() {
             </div>
 
             <button
+              type="button"
               onClick={() => fetchDashboard('refresh')}
-              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 text-sm font-semibold text-gray-700 dark:text-gray-200 shadow-sm hover:border-[#25D366]/40 transition-colors"
+              disabled={isRefreshing}
+              aria-label="Refresh dashboard metrics"
+              className="relative z-20 inline-flex shrink-0 cursor-pointer pointer-events-auto items-center gap-2 rounded-xl border border-gray-100 bg-white px-4 py-2.5 text-sm font-semibold text-gray-700 shadow-sm transition-colors hover:border-[#25D366]/40 disabled:cursor-wait disabled:opacity-70 dark:border-slate-800 dark:bg-slate-900 dark:text-gray-200"
             >
               <RefreshCw className={cn('w-4 h-4', isRefreshing && 'animate-spin')} />
-              Refresh
+              {isRefreshing ? 'Refreshing...' : 'Refresh'}
             </button>
           </div>
 

@@ -95,6 +95,7 @@ interface Conversation {
     id: string;
     name: string;
     phoneNumber?: string;
+    instagramId?: string;
     instagramUsername?: string;
     avatar?: string;
     pipelineStage: string;
@@ -136,6 +137,14 @@ const SESSION_TEMPLATES = [
   { id: 'follow-up', name: 'Follow Up', content: 'Just checking in on your request. Let me know if you still need help.' },
   { id: 'closing', name: 'Closing Statement', content: 'Thank you for contacting us. If you need anything else, we are here to help.' },
 ];
+
+const getConversationContactLabel = (contact?: Conversation['contact']) => {
+  if (contact?.name?.trim()) return contact.name.trim();
+  if (contact?.phoneNumber?.trim()) return contact.phoneNumber.trim();
+  if (contact?.instagramUsername?.trim()) return `@${contact.instagramUsername.trim()}`;
+  if (contact?.instagramId?.trim()) return `Instagram User ${contact.instagramId.trim().slice(-4)}`;
+  return 'Unknown Contact';
+};
 
 function MessageMedia({ message }: { message: Message }) {
   const [mediaUrl, setMediaUrl] = useState<string | null>(null);
@@ -946,7 +955,7 @@ export default function Inbox() {
                   <div className="flex items-center justify-between mb-0.5">
                     <div className="flex items-center gap-1.5 min-w-0">
                       <h3 className="font-medium text-sm text-gray-900 dark:text-gray-100 truncate">
-                        {conv.contact.name || conv.contact.phoneNumber || conv.contact.instagramUsername}
+                        {getConversationContactLabel(conv.contact)}
                       </h3>
                       {conv.priority === 'HIGH' && <div className="w-1.5 h-1.5 rounded-full bg-orange-500 shrink-0" title="High Priority" />}
                       {conv.priority === 'URGENT' && <div className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0 animate-pulse" title="Urgent Priority" />}
@@ -1037,7 +1046,7 @@ export default function Inbox() {
                 <div>
                   <div className="flex items-center gap-2">
                     <h2 className="text-sm font-semibold text-gray-900 dark:text-white">
-                      {selectedConv.contact.name || selectedConv.contact.phoneNumber || selectedConv.contact.instagramUsername}
+                      {getConversationContactLabel(selectedConv.contact)}
                     </h2>
                     <select 
                       value={selectedConv.priority}
@@ -1130,7 +1139,11 @@ export default function Inbox() {
                   <span className="text-xs text-gray-500 dark:text-gray-400">From:</span>
                     <span className="text-xs font-medium text-gray-700 dark:text-gray-300">
                       {selectedConv.channelType === 'INSTAGRAM' 
-                      ? `@${selectedConv.contact.instagramUsername || selectedConv.instagramAccount?.username || 'instagram'}`
+                      ? (selectedConv.contact.instagramUsername
+                          ? `@${selectedConv.contact.instagramUsername}`
+                          : (selectedConv.instagramAccount?.username
+                              ? `@${selectedConv.instagramAccount.username}`
+                              : getConversationContactLabel(selectedConv.contact)))
                       : selectedConv.contact.phoneNumber || selectedConv.number?.phoneNumber || 'No customer number'}
                     </span>
                   </div>
@@ -1477,11 +1490,13 @@ export default function Inbox() {
                       <User className="w-10 h-10" />
                     </div>
                     <h3 className="font-semibold text-gray-900 dark:text-white">
-                      {selectedConv.contact.name || 'Unknown Contact'}
+                      {getConversationContactLabel(selectedConv.contact)}
                     </h3>
                     <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
                       {selectedConv.channelType === 'INSTAGRAM' 
-                        ? `@${selectedConv.contact.instagramUsername}`
+                        ? (selectedConv.contact.instagramUsername
+                            ? `@${selectedConv.contact.instagramUsername}`
+                            : getConversationContactLabel(selectedConv.contact))
                         : selectedConv.contact.phoneNumber}
                     </p>
                     
