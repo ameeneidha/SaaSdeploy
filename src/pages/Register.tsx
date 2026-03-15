@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import axios from 'axios';
-import { Check, Loader2, Lock, Mail, User } from 'lucide-react';
+import { Check, Eye, EyeOff, Loader2, Lock, Mail, User } from 'lucide-react';
 import { useApp } from '../contexts/AppContext';
 import { formatLimitValue, getPlanPrice, PLANS, PlanType, type BillingCycle } from '../constants/plans';
 
@@ -12,9 +12,12 @@ export default function Register() {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [skipAutoRedirect, setSkipAutoRedirect] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [billingCycle] = useState<BillingCycle>(() => {
     const stored = sessionStorage.getItem('pendingBillingCycle');
     return stored === 'annual' ? 'annual' : 'monthly';
@@ -38,14 +41,52 @@ export default function Register() {
     }
   }, [navigate, skipAutoRedirect, user]);
 
+  const passwordChecks = [
+    { label: 'At least 8 characters', valid: password.length >= 8 },
+    { label: 'One uppercase letter', valid: /[A-Z]/.test(password) },
+    { label: 'One lowercase letter', valid: /[a-z]/.test(password) },
+    { label: 'One number', valid: /\d/.test(password) },
+  ];
+
+  const isPasswordValid = passwordChecks.every((item) => item.valid) && password.length <= 72;
+  const doPasswordsMatch = password.length > 0 && password === confirmPassword;
+  const isNameValid = name.trim().length >= 2 && name.trim().length <= 80;
+  const isEmailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/i.test(email.trim());
+  const canSubmit = isNameValid && isEmailValid && isPasswordValid && doPasswordsMatch && !isSubmitting;
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setIsSubmitting(true);
     setError('');
+
+    if (!isNameValid) {
+      setError('Full name must be between 2 and 80 characters.');
+      return;
+    }
+
+    if (!isEmailValid) {
+      setError('Please enter a valid email address.');
+      return;
+    }
+
+    if (!isPasswordValid) {
+      setError('Password must be at least 8 characters and include uppercase, lowercase, and a number.');
+      return;
+    }
+
+    if (!doPasswordsMatch) {
+      setError('Passwords do not match.');
+      return;
+    }
+
+    setIsSubmitting(true);
 
     try {
       setSkipAutoRedirect(true);
-      const res = await axios.post('/api/auth/register', { name, email, password });
+      const res = await axios.post('/api/auth/register', {
+        name: name.trim(),
+        email: email.trim().toLowerCase(),
+        password,
+      });
       setUser(res.data.user, res.data.token);
       navigate('/verify-email-sent', {
         replace: true,
@@ -139,6 +180,7 @@ export default function Register() {
                   type="text"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
+                  autoComplete="name"
                   className="w-full rounded-xl border border-slate-200 bg-slate-50 py-3 pl-10 pr-4 outline-none transition focus:border-[#25D366] focus:bg-white"
                   placeholder="John Doe"
                   required
@@ -154,6 +196,7 @@ export default function Register() {
                   type="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
+                  autoComplete="email"
                   className="w-full rounded-xl border border-slate-200 bg-slate-50 py-3 pl-10 pr-4 outline-none transition focus:border-[#25D366] focus:bg-white"
                   placeholder="name@company.com"
                   required
@@ -166,14 +209,67 @@ export default function Register() {
               <div className="relative">
                 <Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                 <input
-                  type="password"
+                  type={showPassword ? 'text' : 'password'}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="w-full rounded-xl border border-slate-200 bg-slate-50 py-3 pl-10 pr-4 outline-none transition focus:border-[#25D366] focus:bg-white"
-                  placeholder="Create a password"
+                  autoComplete="new-password"
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 py-3 pl-10 pr-12 outline-none transition focus:border-[#25D366] focus:bg-white"
+                  placeholder="Create a strong password"
                   required
                 />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((value) => !value)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 transition hover:text-slate-600"
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                >
+                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
               </div>
+              <div className="grid gap-2 rounded-xl border border-slate-200 bg-slate-50 p-4 text-xs text-slate-600">
+                {passwordChecks.map((item) => (
+                  <div key={item.label} className="flex items-center gap-2">
+                    <span
+                      className={`inline-flex h-4 w-4 items-center justify-center rounded-full text-[10px] ${
+                        item.valid ? 'bg-[#25D366] text-white' : 'bg-slate-200 text-slate-500'
+                      }`}
+                    >
+                      <Check className="h-3 w-3" />
+                    </span>
+                    <span className={item.valid ? 'text-slate-800' : 'text-slate-500'}>{item.label}</span>
+                  </div>
+                ))}
+                <p className="text-[11px] text-slate-500">Maximum 72 characters.</p>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-slate-700">Confirm password</label>
+              <div className="relative">
+                <Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                <input
+                  type={showConfirmPassword ? 'text' : 'password'}
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  autoComplete="new-password"
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 py-3 pl-10 pr-12 outline-none transition focus:border-[#25D366] focus:bg-white"
+                  placeholder="Repeat your password"
+                  required
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowConfirmPassword((value) => !value)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 transition hover:text-slate-600"
+                  aria-label={showConfirmPassword ? 'Hide password confirmation' : 'Show password confirmation'}
+                >
+                  {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
+              {confirmPassword ? (
+                <p className={`text-xs ${doPasswordsMatch ? 'text-[#128C7E]' : 'text-red-500'}`}>
+                  {doPasswordsMatch ? 'Passwords match.' : 'Passwords must match exactly.'}
+                </p>
+              ) : null}
             </div>
 
             {error && (
@@ -184,7 +280,7 @@ export default function Register() {
 
             <button
               type="submit"
-              disabled={isSubmitting}
+              disabled={!canSubmit}
               className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#25D366] px-4 py-3 font-semibold text-white transition hover:bg-[#128C7E] disabled:opacity-60"
             >
               {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}

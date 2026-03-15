@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import axios from 'axios';
 import { useApp } from '../contexts/AppContext';
 import socket from '../lib/socket';
@@ -6,6 +6,7 @@ import {
   Search, 
   Filter, 
   MoreVertical, 
+  ChevronDown,
   Smile, 
   Paperclip, 
   FileText, 
@@ -33,6 +34,12 @@ import ActivationChecklist from '../components/ActivationChecklist';
 import { toast } from 'sonner';
 import ContactListPicker from '../components/ContactListPicker';
 import AppTooltip from '../components/AppTooltip';
+import {
+  DEFAULT_PIPELINE_STAGE_KEY,
+  getFallbackPipelineStageKey,
+  getPipelineStageColor,
+  PipelineStage,
+} from '../lib/pipelineStages';
 
 interface Message {
   id: string;
@@ -76,6 +83,12 @@ interface PendingAttachment {
   file: File;
 }
 
+interface SessionTemplate {
+  id: string;
+  name: string;
+  content: string;
+}
+
 interface Conversation {
   id: string;
   channelType: 'WHATSAPP' | 'INSTAGRAM';
@@ -96,6 +109,7 @@ interface Conversation {
     name: string;
     phoneNumber?: string;
     instagramId?: string;
+    instagramScopedUserId?: string;
     instagramUsername?: string;
     avatar?: string;
     pipelineStage: string;
@@ -129,20 +143,17 @@ interface Conversation {
   };
   tasks?: Task[];
   activities?: Activity[];
+  unreadCount?: number;
 }
 
 const QUICK_EMOJIS = ['\u{1F642}', '\u{1F44D}', '\u{1F64F}', '\u{1F525}', '\u{2705}', '\u{1F389}', '\u{1F4DE}', '\u{1F440}'];
-const SESSION_TEMPLATES = [
-  { id: 'greeting', name: 'Quick Greeting', content: 'Hi there! How can I help you today?' },
-  { id: 'follow-up', name: 'Follow Up', content: 'Just checking in on your request. Let me know if you still need help.' },
-  { id: 'closing', name: 'Closing Statement', content: 'Thank you for contacting us. If you need anything else, we are here to help.' },
-];
 
 const getConversationContactLabel = (contact?: Conversation['contact']) => {
+  if (contact?.instagramUsername?.trim()) return `@${contact.instagramUsername.trim()}`;
   if (contact?.name?.trim()) return contact.name.trim();
   if (contact?.phoneNumber?.trim()) return contact.phoneNumber.trim();
-  if (contact?.instagramUsername?.trim()) return `@${contact.instagramUsername.trim()}`;
-  if (contact?.instagramId?.trim()) return `Instagram User ${contact.instagramId.trim().slice(-4)}`;
+  if (contact?.instagramScopedUserId?.trim()) return `IG User ${contact.instagramScopedUserId.trim().slice(-4)}`;
+  if (contact?.instagramId?.trim()) return `IG User ${contact.instagramId.trim().slice(-4)}`;
   return 'Unknown Contact';
 };
 
@@ -288,12 +299,15 @@ export default function Inbox() {
   const [isCreating, setIsCreating] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [showTemplatePicker, setShowTemplatePicker] = useState(false);
+  const [sessionTemplates, setSessionTemplates] = useState<SessionTemplate[]>([]);
+  const [pipelineStages, setPipelineStages] = useState<PipelineStage[]>([]);
+  const [templatePickerSearch, setTemplatePickerSearch] = useState('');
   const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
   const [sendError, setSendError] = useState<string | null>(null);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [showFilters, setShowFilters] = useState(false);
-  const [channelFilter, setChannelFilter] = useState<'ALL' | 'WHATSAPP' | 'INSTAGRAM'>('ALL');
+  const [channelFilter, setChannelFilter] = useState<'ALL' | 'WHATSAPP'>('ALL');
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'OPEN' | 'WAITING_FOR_CUSTOMER' | 'WAITING_FOR_INTERNAL' | 'RESOLVED'>('ALL');
   const [contactDraft, setContactDraft] = useState({ name: '', phoneNumber: '', listNames: [] as string[] });
   const [contactLists, setContactLists] = useState<ContactListOption[]>([]);
@@ -315,11 +329,29 @@ export default function Inbox() {
 
     return matchesSearch && matchesChannel && matchesStatus;
   });
+  const activePipelineStageKey =
+    selectedConv?.contact.pipelineStage ||
+    getFallbackPipelineStageKey(pipelineStages) ||
+    DEFAULT_PIPELINE_STAGE_KEY;
+  const activePipelineStageColor = getPipelineStageColor(pipelineStages, activePipelineStageKey);
+
+  const filteredSessionTemplates = useMemo(() => {
+    const query = templatePickerSearch.trim().toLowerCase();
+    if (!query) {
+      return sessionTemplates;
+    }
+
+    return sessionTemplates.filter((template) =>
+      [template.name, template.content].join(' ').toLowerCase().includes(query)
+    );
+  }, [sessionTemplates, templatePickerSearch]);
 
   useEffect(() => {
     if (activeWorkspace) {
       fetchConversations();
       fetchContactLists();
+      fetchSessionTemplates();
+      fetchPipelineStages();
       
       // Socket.io setup
       socket.connect();
@@ -443,6 +475,34 @@ export default function Inbox() {
     }
   };
 
+  const fetchSessionTemplates = async () => {
+    if (!activeWorkspace?.id) {
+      setSessionTemplates([]);
+      return;
+    }
+
+    try {
+      const res = await axios.get(`/api/templates/session?workspaceId=${activeWorkspace.id}`);
+      setSessionTemplates(Array.isArray(res.data) ? res.data : []);
+    } catch (error) {
+      console.error('Failed to fetch session templates', error);
+    }
+  };
+
+  const fetchPipelineStages = async () => {
+    if (!activeWorkspace?.id) {
+      setPipelineStages([]);
+      return;
+    }
+
+    try {
+      const res = await axios.get(`/api/pipeline-stages?workspaceId=${activeWorkspace.id}`);
+      setPipelineStages(Array.isArray(res.data) ? res.data : []);
+    } catch (error) {
+      console.error('Failed to fetch pipeline stages', error);
+    }
+  };
+
   const loadConversationDetails = async (id: string) => {
     try {
       const res = await axios.get(`/api/conversations/${id}`);
@@ -453,6 +513,16 @@ export default function Inbox() {
         if (prev && prev.id !== id) return prev;
         return conversation;
       });
+      setConversations(prev =>
+        prev.map(conv =>
+          conv.id === id
+            ? {
+                ...conv,
+                unreadCount: 0,
+              }
+            : conv
+        )
+      );
       fetchSuggestions(id, data);
     } catch (error) {
       console.error('Failed to fetch messages', error);
@@ -646,7 +716,21 @@ export default function Inbox() {
     setNewMessage(templateContent);
     setSendError(null);
     setShowTemplatePicker(false);
+    setTemplatePickerSearch('');
     setTimeout(() => messageInputRef.current?.focus(), 0);
+  };
+
+  const handleTemplatePickerToggle = async () => {
+    const nextOpen = !showTemplatePicker;
+    setShowTemplatePicker(nextOpen);
+    setShowEmojiPicker(false);
+
+    if (nextOpen) {
+      setTemplatePickerSearch('');
+      await fetchSessionTemplates();
+    } else {
+      setTemplatePickerSearch('');
+    }
   };
 
   const conversationHasAiBot = (conversation: Conversation | null) => {
@@ -889,12 +973,11 @@ export default function Inbox() {
               <div className="grid grid-cols-2 gap-2">
                 <select
                   value={channelFilter}
-                  onChange={(e) => setChannelFilter(e.target.value as 'ALL' | 'WHATSAPP' | 'INSTAGRAM')}
+                  onChange={(e) => setChannelFilter(e.target.value as 'ALL' | 'WHATSAPP')}
                   className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-xs font-medium text-gray-700 outline-none focus:border-[#25D366] dark:border-slate-700 dark:bg-slate-800 dark:text-gray-200"
                 >
                   <option value="ALL">All channels</option>
                   <option value="WHATSAPP">WhatsApp</option>
-                  <option value="INSTAGRAM">Instagram</option>
                 </select>
                 <select
                   value={statusFilter}
@@ -924,14 +1007,22 @@ export default function Inbox() {
         )}
 
         <div className="flex-1 overflow-y-auto">
-          {filteredConversations.map((conv) => (
+          {filteredConversations.map((conv) => {
+            const unreadCount = conv.unreadCount || 0;
+            const hasUnread = unreadCount > 0;
+
+            return (
             <button
               key={conv.id}
               onClick={() => setSelectedConv(conv)}
               className={cn(
-                "relative w-full p-4 flex items-center gap-3 transition-colors border-b border-gray-50 dark:border-slate-800/50 before:absolute before:left-0 before:top-3 before:bottom-3 before:w-1 before:rounded-r-full",
+                "relative w-full p-4 flex items-center gap-3 transition-colors border-b border-gray-50 dark:border-slate-800/50 before:absolute before:left-0 before:top-3 before:bottom-3 before:rounded-r-full",
                 getConversationStatusStyles(conv.internalStatus).rail,
-                selectedConv?.id === conv.id ? "bg-[#25D366]/5 dark:bg-[#25D366]/10" : "hover:bg-gray-50 dark:hover:bg-slate-800/50"
+                selectedConv?.id === conv.id
+                  ? "bg-[#25D366]/5 dark:bg-[#25D366]/10"
+                  : hasUnread
+                    ? "before:w-1.5 border-l-4 border-l-[#25D366] bg-[#25D366]/[0.09] shadow-[inset_0_0_0_1px_rgba(37,211,102,0.12)] hover:bg-[#25D366]/[0.14] dark:bg-[#25D366]/[0.12] dark:hover:bg-[#25D366]/[0.18]"
+                    : "hover:bg-gray-50 dark:hover:bg-slate-800/50"
               )}
             >
               <div className="w-12 h-12 bg-gray-100 dark:bg-slate-800 rounded-full flex items-center justify-center text-gray-400 shrink-0 relative">
@@ -954,16 +1045,29 @@ export default function Inbox() {
                 <div className="flex-1 min-w-0 text-left">
                   <div className="flex items-center justify-between mb-0.5">
                     <div className="flex items-center gap-1.5 min-w-0">
-                      <h3 className="font-medium text-sm text-gray-900 dark:text-gray-100 truncate">
+                      <h3 className={cn(
+                        "text-sm truncate",
+                        hasUnread
+                          ? "font-bold text-gray-950 dark:text-white"
+                          : "font-medium text-gray-900 dark:text-gray-100"
+                      )}>
                         {getConversationContactLabel(conv.contact)}
                       </h3>
+                      {hasUnread && (
+                        <span className="inline-flex h-2.5 w-2.5 shrink-0 rounded-full bg-[#25D366]" title="Unread conversation" />
+                      )}
                       {conv.priority === 'HIGH' && <div className="w-1.5 h-1.5 rounded-full bg-orange-500 shrink-0" title="High Priority" />}
                       {conv.priority === 'URGENT' && <div className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0 animate-pulse" title="Urgent Priority" />}
                       {conv.slaStatus === 'BREACHED' && (
                         <div className="px-1 py-0.5 bg-red-50 text-red-600 text-[8px] font-bold rounded uppercase tracking-tighter shrink-0">SLA</div>
                       )}
                     </div>
-                    <span className="text-[10px] text-gray-400 shrink-0">
+                    <span className={cn(
+                      "shrink-0 text-[10px]",
+                      hasUnread
+                        ? "font-bold text-[#128C7E] dark:text-[#7DE2A8]"
+                        : "text-gray-400"
+                    )}>
                       {conv.lastMessageAt ? (
                         (() => {
                           try {
@@ -976,6 +1080,11 @@ export default function Inbox() {
                     </span>
                   </div>
                   <div className="mb-1.5 flex items-center gap-2">
+                    {hasUnread && (
+                      <span className="inline-flex items-center rounded-full bg-[#25D366] px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-white shadow-sm">
+                        Unread
+                      </span>
+                    )}
                     {conv.internalStatus !== 'OPEN' && (
                       <span
                         className={cn(
@@ -988,24 +1097,36 @@ export default function Inbox() {
                     )}
                   </div>
                   <div className="flex items-center justify-between">
-                    <p className="text-xs text-gray-500 truncate flex-1 mr-2">
+                    <p className={cn(
+                      "text-xs truncate flex-1 mr-2",
+                      hasUnread
+                        ? "font-semibold text-gray-800 dark:text-gray-200"
+                        : "text-gray-500"
+                    )}>
                       {conv.messages[0]?.content || 'No messages'}
                     </p>
-                    {conv.assignedTo && (
-                      <div className="flex -space-x-1 shrink-0">
-                        <div className="w-4 h-4 rounded-full bg-gray-200 border border-white flex items-center justify-center overflow-hidden" title={`Assigned to ${conv.assignedTo.name}`}>
-                          {conv.assignedTo.image ? (
-                            <img src={conv.assignedTo.image} alt="" className="w-full h-full object-cover" />
-                          ) : (
-                            <User className="w-2.5 h-2.5 text-gray-400" />
-                          )}
+                    <div className="flex items-center gap-2 shrink-0">
+                      {hasUnread && (
+                        <span className="min-w-6 rounded-full bg-[#25D366] px-2 py-0.5 text-center text-[10px] font-extrabold text-white shadow-sm">
+                          {unreadCount}
+                        </span>
+                      )}
+                      {conv.assignedTo && (
+                        <div className="flex -space-x-1 shrink-0">
+                          <div className="w-4 h-4 rounded-full bg-gray-200 border border-white flex items-center justify-center overflow-hidden" title={`Assigned to ${conv.assignedTo.name}`}>
+                            {conv.assignedTo.image ? (
+                              <img src={conv.assignedTo.image} alt="" className="w-full h-full object-cover" />
+                            ) : (
+                              <User className="w-2.5 h-2.5 text-gray-400" />
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    )}
+                      )}
+                    </div>
                   </div>
               </div>
             </button>
-          ))}
+          )})}
           {filteredConversations.length === 0 && (
             <div className="px-6 py-12 text-center">
               <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-gray-100 text-gray-400 dark:bg-slate-800 dark:text-gray-500">
@@ -1091,7 +1212,7 @@ export default function Inbox() {
                   )}
                 </div>
               </div>
-              <div className="flex items-center gap-4">
+              <div className="flex flex-wrap items-center justify-end gap-3">
                 {conversationHasAiBot(selectedConv) && (
                   <AppTooltip
                     content={
@@ -1123,6 +1244,33 @@ export default function Inbox() {
                     </button>
                   </AppTooltip>
                 )}
+                <div
+                  className="flex items-center gap-2 rounded-lg border border-gray-100 bg-gray-50 px-3 py-1.5 dark:border-slate-700 dark:bg-slate-800"
+                  style={{
+                    borderColor: `${activePipelineStageColor}4D`,
+                    backgroundColor: `${activePipelineStageColor}14`,
+                  }}
+                >
+                  <span className="inline-flex h-2.5 w-2.5 rounded-full" style={{ backgroundColor: activePipelineStageColor }} />
+                  <span className="text-xs font-medium" style={{ color: activePipelineStageColor }}>Stage:</span>
+                  <div className="relative">
+                    <select
+                      value={activePipelineStageKey}
+                      disabled={isRestrictedMode}
+                      onChange={(e) => updateContact(selectedConv.contact.id, { pipelineStage: e.target.value })}
+                      className="min-w-[150px] appearance-none bg-transparent pr-6 text-xs font-bold outline-none cursor-pointer"
+                      style={{ color: activePipelineStageColor }}
+                    >
+                      {pipelineStages.map((stage) => (
+                        <option key={stage.id} value={stage.key}>{stage.name}</option>
+                      ))}
+                    </select>
+                    <ChevronDown
+                      className="pointer-events-none absolute right-0 top-1/2 h-3.5 w-3.5 -translate-y-1/2"
+                      style={{ color: activePipelineStageColor }}
+                    />
+                  </div>
+                </div>
                 <div className="flex items-center gap-2 px-3 py-1.5 bg-gray-50 dark:bg-slate-800 rounded-lg border border-gray-100 dark:border-slate-700">
                   <span className="text-xs text-gray-500 dark:text-gray-400">Assigned to:</span>
                   <select
@@ -1342,33 +1490,59 @@ export default function Inbox() {
                     <AppTooltip content="Insert template" side="top">
                       <button
                         type="button"
-                        onClick={() => {
-                          setShowTemplatePicker((prev) => !prev);
-                          setShowEmojiPicker(false);
-                        }}
+                        onClick={handleTemplatePickerToggle}
                         className="p-2 hover:bg-gray-50 dark:hover:bg-slate-800 rounded-lg text-gray-400"
                       >
                         <FileText className="w-5 h-5" />
                       </button>
                     </AppTooltip>
                     {showTemplatePicker && (
-                      <div className="absolute bottom-12 left-0 z-20 w-72 rounded-2xl border border-gray-200 bg-white p-2 shadow-xl dark:border-slate-700 dark:bg-slate-900">
-                        <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500">
-                          Session Templates
-                        </div>
-                        {SESSION_TEMPLATES.map((template) => (
-                          <button
-                            key={template.id}
-                            type="button"
-                            onClick={() => handleTemplateInsert(template.content)}
-                            className="w-full rounded-xl px-3 py-2 text-left transition hover:bg-gray-50 dark:hover:bg-slate-800"
-                          >
-                            <div className="text-xs font-semibold text-gray-900 dark:text-white">{template.name}</div>
-                            <div className="mt-1 line-clamp-2 text-[11px] text-gray-500 dark:text-gray-400">
-                              {template.content}
+                      <div className="absolute bottom-12 left-0 z-20 w-80 max-h-[26rem] overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-xl dark:border-slate-700 dark:bg-slate-900">
+                        <div className="border-b border-gray-100 px-3 py-3 dark:border-slate-800">
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="text-[10px] font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500">
+                              Session Templates
                             </div>
-                          </button>
-                        ))}
+                            <span className="rounded-full bg-[#25D366]/10 px-2 py-0.5 text-[10px] font-semibold text-[#128C7E]">
+                              {filteredSessionTemplates.length}
+                            </span>
+                          </div>
+                          <div className="relative mt-2">
+                            <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
+                            <input
+                              type="text"
+                              value={templatePickerSearch}
+                              onChange={(e) => setTemplatePickerSearch(e.target.value)}
+                              placeholder="Search templates..."
+                              className="w-full rounded-xl border border-gray-200 bg-gray-50 py-2 pl-9 pr-3 text-xs text-gray-700 outline-none transition focus:border-[#25D366]/30 focus:bg-white focus:ring-2 focus:ring-[#25D366]/10 dark:border-slate-700 dark:bg-slate-800 dark:text-gray-200 dark:focus:bg-slate-900"
+                            />
+                          </div>
+                        </div>
+                        <div className="max-h-[18rem] overflow-y-auto overscroll-contain scroll-smooth p-2">
+                          {sessionTemplates.length === 0 ? (
+                            <div className="px-3 py-4 text-sm text-gray-500 dark:text-gray-400">
+                              No session templates yet. Create one on the Message Templates page.
+                            </div>
+                          ) : filteredSessionTemplates.length === 0 ? (
+                            <div className="px-3 py-4 text-sm text-gray-500 dark:text-gray-400">
+                              No templates match your search.
+                            </div>
+                          ) : (
+                            filteredSessionTemplates.map((template) => (
+                              <button
+                                key={template.id}
+                                type="button"
+                                onClick={() => handleTemplateInsert(template.content)}
+                                className="w-full rounded-xl px-3 py-2 text-left transition hover:bg-gray-50 dark:hover:bg-slate-800"
+                              >
+                                <div className="text-xs font-semibold text-gray-900 dark:text-white">{template.name}</div>
+                                <div className="mt-1 line-clamp-2 text-[11px] text-gray-500 dark:text-gray-400">
+                                  {template.content}
+                                </div>
+                              </button>
+                            ))
+                          )}
+                        </div>
                       </div>
                     )}
                   </div>
@@ -1537,17 +1711,14 @@ export default function Inbox() {
                         Save Contact
                       </button>
                       <select 
-                        value={selectedConv.contact.pipelineStage || 'NEW_LEAD'}
+                        value={selectedConv.contact.pipelineStage || getFallbackPipelineStageKey(pipelineStages) || DEFAULT_PIPELINE_STAGE_KEY}
                         disabled={isRestrictedMode}
                         onChange={(e) => updateContact(selectedConv.contact.id, { pipelineStage: e.target.value })}
                         className="w-full px-4 py-2 bg-gray-50 dark:bg-slate-800 text-gray-700 dark:text-gray-300 text-xs font-bold rounded-xl border-none outline-none cursor-pointer uppercase tracking-wider transition-colors"
                       >
-                        <option value="NEW_LEAD">New Lead</option>
-                        <option value="CONTACTED">Contacted</option>
-                        <option value="QUALIFIED">Qualified</option>
-                        <option value="QUOTE_SENT">Quote Sent</option>
-                        <option value="WON">Won</option>
-                        <option value="LOST">Lost</option>
+                        {pipelineStages.map((stage) => (
+                          <option key={stage.id} value={stage.key}>{stage.name}</option>
+                        ))}
                       </select>
                     </div>
                   </div>

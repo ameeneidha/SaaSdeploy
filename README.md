@@ -28,6 +28,41 @@ The repo also includes an App Platform spec:
 
 ## Update Log
 
+### March 15, 2026
+
+- Repositioned the product for a WhatsApp-only launch:
+  - removed Instagram from the homepage pricing and positioning
+  - removed the public Enterprise plan from pricing surfaces
+  - updated the homepage CTA, footer, pricing cards, comparison matrix, and FAQ to focus on WhatsApp CRM, broadcasts, inbox, and automation
+- Disabled Instagram for the launch release:
+  - removed Instagram from channels, dashboard, inbox filters, integrations, checklist, and settings UI
+  - backend now ignores Instagram webhook events in launch mode
+  - Instagram account routes return empty/blocked responses in launch mode
+  - conversations and dashboard channel usage are filtered to WhatsApp for the launch build
+- Upgraded CRM stage management:
+  - each workspace now has one customizable pipeline
+  - stages can be renamed, recolored, reordered, added, and deleted
+  - default stages can also be deleted
+  - deleting a stage automatically moves affected leads into a remaining stage
+  - CRM, Inbox, Contacts, Broadcast audiences, imports, and dashboard pipeline summaries all now use the workspace stage list
+- Improved inbox workflow:
+  - added CRM stage dropdown to the top chat header
+  - stage selector now uses the same selected color as the CRM stage config
+  - unread conversations are highlighted more clearly with stronger visual treatment
+- Fixed session templates and inbox sync:
+  - session templates now use real backend CRUD
+  - create, edit, duplicate, delete, copy, and search all work from the templates page
+  - inbox session templates now sync with saved session templates instead of using a fake hardcoded list
+  - template picker now supports scrolling and search for large template libraries
+- Improved registration and email delivery:
+  - upgraded registration with confirm-password, stronger password validation, and better client-side guidance
+  - verification and forgot-password email flows now use Resend properly for deployment
+  - local preview-link mode is now controlled by `ALLOW_EMAIL_LINK_PREVIEW`
+- Deployment readiness updates:
+  - this release is prepared for WhatsApp-first deployment on DigitalOcean
+  - production email delivery expects `RESEND_API_KEY` and `EMAIL_FROM`
+  - Instagram code remains in the codebase for a later release, but it is disabled for this launch build
+
 ### March 14, 2026
 
 - Hardened core backend security:

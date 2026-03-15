@@ -17,7 +17,7 @@ export default function VerifyEmailSent() {
   const state = (location.state || {}) as VerificationPageState;
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
-  const [message, setMessage] = useState(state.message || 'We prepared your email verification step.');
+  const [message, setMessage] = useState(state.message || 'We sent your verification email.');
   const [emailSent, setEmailSent] = useState(Boolean(state.emailSent));
   const [verificationUrl, setVerificationUrl] = useState(state.verificationUrl || '');
 
@@ -108,7 +108,7 @@ export default function VerifyEmailSent() {
             className="flex w-full items-center justify-center gap-2 rounded-lg bg-[#25D366] py-2.5 font-medium text-white transition-colors hover:bg-[#128C7E] disabled:opacity-50"
           >
             {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-            {emailSent ? 'Resend verification email' : 'Prepare verification link again'}
+            {emailSent ? 'Resend verification email' : verificationUrl ? 'Prepare verification link again' : 'Send verification email again'}
           </button>
         </div>
 

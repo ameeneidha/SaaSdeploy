@@ -9,8 +9,7 @@ import {
   Globe, 
   Database,
   ArrowUpRight,
-  CheckCircle2,
-  Instagram
+  CheckCircle2
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { toast } from 'sonner';
@@ -63,24 +62,10 @@ export default function Integrations() {
       connected: false,
       category: 'Productivity'
     },
-    {
-      id: 'instagram',
-      name: 'Instagram DMs',
-      description: 'Connect your Instagram Business account to manage DMs directly from your unified inbox.',
-      icon: Instagram,
-      color: 'bg-pink-50 text-pink-600',
-      connected: true,
-      category: 'Communication'
-    },
   ];
 
   const handleConnect = (id: string) => {
-    if (id === 'instagram') {
-      navigate('/app/channels');
-      toast.success('Instagram integration is active. Manage it in Channels.');
-    } else {
-      toast.info(`${id} integration is coming soon!`);
-    }
+    toast.info(`${id} integration is coming soon!`);
   };
 
   return (

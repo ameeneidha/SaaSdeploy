@@ -16,6 +16,7 @@ import { motion } from 'motion/react';
 import { cn } from '../lib/utils';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
+import { PipelineStage } from '../lib/pipelineStages';
 
 interface ContactList {
   id: string;
@@ -99,21 +100,13 @@ function CampaignPreviewCard({ campaign }: { campaign: Pick<Campaign, 'name' | '
   );
 }
 
-const PIPELINE_STAGE_LABELS: Record<string, string> = {
-  NEW_LEAD: 'New Lead',
-  CONTACTED: 'Contacted',
-  QUALIFIED: 'Qualified',
-  QUOTE_SENT: 'Quote Sent',
-  WON: 'Won',
-  LOST: 'Lost',
-};
-
 export default function Broadcast() {
   const { activeWorkspace } = useApp();
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [contactLists, setContactLists] = useState<ContactList[]>([]);
   const [numbers, setNumbers] = useState<WhatsAppChannel[]>([]);
   const [contacts, setContacts] = useState<Contact[]>([]);
+  const [pipelineStages, setPipelineStages] = useState<PipelineStage[]>([]);
   const [isCreating, setIsCreating] = useState(false);
   const [selectedCampaign, setSelectedCampaign] = useState<CampaignDetail | null>(null);
   const [previewCampaign, setPreviewCampaign] = useState<Campaign | null>(null);
@@ -125,6 +118,7 @@ export default function Broadcast() {
       fetchContactLists();
       fetchNumbers();
       fetchContacts();
+      fetchPipelineStages();
     }
   }, [activeWorkspace]);
 
@@ -175,6 +169,15 @@ export default function Broadcast() {
     try {
       const res = await axios.get(`/api/contacts?workspaceId=${activeWorkspace?.id}`);
       setContacts(Array.isArray(res.data) ? res.data : []);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const fetchPipelineStages = async () => {
+    try {
+      const res = await axios.get(`/api/pipeline-stages?workspaceId=${activeWorkspace?.id}`);
+      setPipelineStages(Array.isArray(res.data) ? res.data : []);
     } catch (e) {
       console.error(e);
     }
@@ -233,6 +236,7 @@ export default function Broadcast() {
             contactLists={contactLists}
             numbers={numbers}
             contacts={contacts}
+            pipelineStages={pipelineStages}
           />
         ) : (
           campaigns.length === 0 ? (
@@ -444,6 +448,7 @@ function BroadcastBuilder({
   contactLists,
   numbers,
   contacts,
+  pipelineStages,
 }: {
   onCancel: () => void;
   onCreated: (campaign: Campaign) => void;
@@ -451,6 +456,7 @@ function BroadcastBuilder({
   contactLists: ContactList[];
   numbers: WhatsAppChannel[];
   contacts: Contact[];
+  pipelineStages: PipelineStage[];
 }) {
   const [step, setStep] = useState(1);
   const [isLaunching, setIsLaunching] = useState(false);
@@ -461,11 +467,11 @@ function BroadcastBuilder({
   const [testPhoneNumber, setTestPhoneNumber] = useState('');
   const activeNumbers = numbers.filter((number) => number.status === 'CONNECTED');
   const phoneContacts = contacts.filter((contact) => Boolean(contact.phoneNumber));
-  const pipelineOptions: AudienceOption[] = Object.entries(PIPELINE_STAGE_LABELS)
-    .map(([stage, label]) => ({
-      id: stage,
-      label,
-      count: phoneContacts.filter((contact) => contact.pipelineStage === stage).length,
+  const pipelineOptions: AudienceOption[] = pipelineStages
+    .map((stage) => ({
+      id: stage.key,
+      label: stage.name,
+      count: phoneContacts.filter((contact) => contact.pipelineStage === stage.key).length,
       type: 'PIPELINE' as const,
     }))
     .filter((option) => option.count > 0);

@@ -26,7 +26,7 @@ import axios from 'axios';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
 import ActivationChecklist from '../components/ActivationChecklist';
-import { ENTERPRISE_PLAN, formatLimitValue, getPlanConfig, getPlanPrice, isPaidPlan, PLAN_ORDER, PLANS, PlanType } from '../constants/plans';
+import { formatLimitValue, getPlanConfig, getPlanPrice, isPaidPlan, PLAN_ORDER, PLANS, PlanType } from '../constants/plans';
 
 const settingsNav = [
   { icon: User, label: 'Personal', path: '/app/settings/personal' },
@@ -635,10 +635,6 @@ function Billing() {
                       <span className="font-semibold text-gray-900 dark:text-white">{formatLimitValue(currentPlanInfo.whatsappLimit)}</span>
                     </div>
                     <div className="flex justify-between text-sm">
-                      <span className="text-gray-500 dark:text-gray-400">Instagram Accounts</span>
-                      <span className="font-semibold text-gray-900 dark:text-white">{formatLimitValue(currentPlanInfo.instagramLimit)}</span>
-                    </div>
-                    <div className="flex justify-between text-sm">
                       <span className="text-gray-500 dark:text-gray-400">AI Assistants</span>
                       <span className="font-semibold text-gray-900 dark:text-white">{formatLimitValue(currentPlanInfo.chatbotLimit)}</span>
                     </div>
@@ -818,30 +814,6 @@ function Billing() {
                 </button>
               </div>
             )})}
-            </div>
-            <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-              <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-                <div>
-                  <p className="text-sm font-bold uppercase tracking-[0.2em] text-slate-400">Enterprise</p>
-                  <h3 className="mt-2 text-2xl font-semibold text-gray-900 dark:text-white">{ENTERPRISE_PLAN.shortLabel}</h3>
-                  <p className="mt-2 max-w-3xl text-sm text-gray-500 dark:text-gray-400">{ENTERPRISE_PLAN.description}</p>
-                </div>
-                <a
-                  href="https://tawasel.io"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center justify-center rounded-xl bg-slate-900 px-5 py-3 text-sm font-bold text-white transition-colors hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600"
-                >
-                  {ENTERPRISE_PLAN.ctaLabel}
-                </a>
-              </div>
-              <div className="mt-6 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                {ENTERPRISE_PLAN.cardHighlights.map((item) => (
-                  <div key={item} className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-300">
-                    {item}
-                  </div>
-                ))}
-              </div>
             </div>
           </div>
         } />

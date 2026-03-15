@@ -19,6 +19,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const FIXED_CHATBOT_MODEL = "gpt-4.1-mini";
+const INSTAGRAM_INTEGRATION_ENABLED = false;
 const GPT_4_1_MINI_INPUT_COST_PER_1M = 0.4;
 const GPT_4_1_MINI_CACHED_INPUT_COST_PER_1M = 0.1;
 const GPT_4_1_MINI_OUTPUT_COST_PER_1M = 1.6;
@@ -43,6 +44,11 @@ const upload = multer({
 
 const normalizePhone = (value?: string | null) => (value || "").replace(/\D/g, "");
 const EMAIL_LIKE_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/i;
+const PASSWORD_MIN_LENGTH = 8;
+const PASSWORD_MAX_LENGTH = 72;
+const PASSWORD_UPPERCASE_REGEX = /[A-Z]/;
+const PASSWORD_LOWERCASE_REGEX = /[a-z]/;
+const PASSWORD_NUMBER_REGEX = /\d/;
 const WORKSPACE_USER_LIMITS: Record<string, number> = {
   STARTER: 1,
   GROWTH: 5,
@@ -90,15 +96,6 @@ const WORKSPACE_PLAN_LIMITS: Record<
   },
 };
 
-const DASHBOARD_STAGE_LABELS: Record<string, string> = {
-  NEW_LEAD: 'New Lead',
-  CONTACTED: 'Contacted',
-  QUALIFIED: 'Qualified',
-  QUOTE_SENT: 'Quote Sent',
-  WON: 'Won',
-  LOST: 'Lost',
-};
-
 const JWT_SECRET = (() => {
   const value = (process.env.JWT_SECRET || '').trim();
   if (!value || value === 'your-secret-key-here' || value.length < 32) {
@@ -136,10 +133,23 @@ const ALLOWED_ORIGINS = Array.from(
 const AUTH_RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
 const AUTH_RATE_LIMIT_MAX = 10;
 const authRateLimitStore = new Map<string, { count: number; resetAt: number }>();
+const IS_PRODUCTION = (process.env.NODE_ENV || '').trim().toLowerCase() === 'production';
+const EMAIL_LINK_PREVIEW_ENABLED =
+  !IS_PRODUCTION && (process.env.ALLOW_EMAIL_LINK_PREVIEW || 'true').trim().toLowerCase() !== 'false';
 
 const getWorkspaceUserLimit = (plan?: string | null) => WORKSPACE_USER_LIMITS[(plan || '').toUpperCase()] || 1;
+const applyChannelFeatureFlagsToPlanLimits = <T extends { instagram: number }>(limits: T): T =>
+  INSTAGRAM_INTEGRATION_ENABLED
+    ? limits
+    : {
+        ...limits,
+        instagram: 0,
+      };
+
 const getWorkspacePlanLimits = (plan?: string | null) =>
-  WORKSPACE_PLAN_LIMITS[(plan || '').toUpperCase()] || WORKSPACE_PLAN_LIMITS.STARTER;
+  applyChannelFeatureFlagsToPlanLimits(
+    WORKSPACE_PLAN_LIMITS[(plan || '').toUpperCase()] || WORKSPACE_PLAN_LIMITS.STARTER
+  );
 
 const deriveNameFromEmail = (email?: string | null) => {
   const localPart = (email || '').split('@')[0]?.trim();
@@ -162,6 +172,50 @@ const sanitizeDisplayName = (name?: string | null, email?: string | null) => {
   return trimmedName;
 };
 
+const validateRegistrationInput = ({
+  name,
+  email,
+  password,
+}: {
+  name: string;
+  email: string;
+  password: string;
+}) => {
+  if (name.trim().length < 2) {
+    return 'Full name must be at least 2 characters.';
+  }
+
+  if (name.trim().length > 80) {
+    return 'Full name must be 80 characters or fewer.';
+  }
+
+  if (!EMAIL_LIKE_REGEX.test(email)) {
+    return 'Please enter a valid email address.';
+  }
+
+  if (password.length < PASSWORD_MIN_LENGTH) {
+    return `Password must be at least ${PASSWORD_MIN_LENGTH} characters.`;
+  }
+
+  if (password.length > PASSWORD_MAX_LENGTH) {
+    return `Password must be ${PASSWORD_MAX_LENGTH} characters or fewer.`;
+  }
+
+  if (!PASSWORD_UPPERCASE_REGEX.test(password)) {
+    return 'Password must include at least one uppercase letter.';
+  }
+
+  if (!PASSWORD_LOWERCASE_REGEX.test(password)) {
+    return 'Password must include at least one lowercase letter.';
+  }
+
+  if (!PASSWORD_NUMBER_REGEX.test(password)) {
+    return 'Password must include at least one number.';
+  }
+
+  return null;
+};
+
 const createSecureToken = () => {
   const token = crypto.randomBytes(32).toString('hex');
   const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
@@ -171,11 +225,284 @@ const createSecureToken = () => {
 const getInstagramContactFallbackName = (instagramId?: string | null) => {
   const normalized = String(instagramId || '').trim();
   if (!normalized) {
-    return 'Instagram User';
+    return 'IG User';
   }
 
   const suffix = normalized.slice(-4);
-  return suffix ? `Instagram User ${suffix}` : 'Instagram User';
+  return suffix ? `IG User ${suffix}` : 'IG User';
+};
+
+const DEFAULT_PIPELINE_STAGE_KEY = 'NEW_LEAD';
+const PIPELINE_STAGE_COLOR_REGEX = /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i;
+const DEFAULT_WORKSPACE_PIPELINE_STAGES = [
+  {
+    key: 'NEW_LEAD',
+    name: 'New Lead',
+    color: '#3B82F6',
+    position: 0,
+    isSystem: true,
+    isTerminal: false,
+    terminalType: 'OPEN',
+  },
+  {
+    key: 'CONTACTED',
+    name: 'Contacted',
+    color: '#6366F1',
+    position: 1,
+    isSystem: true,
+    isTerminal: false,
+    terminalType: 'OPEN',
+  },
+  {
+    key: 'QUALIFIED',
+    name: 'Qualified',
+    color: '#8B5CF6',
+    position: 2,
+    isSystem: true,
+    isTerminal: false,
+    terminalType: 'OPEN',
+  },
+  {
+    key: 'QUOTE_SENT',
+    name: 'Quote Sent',
+    color: '#F97316',
+    position: 3,
+    isSystem: true,
+    isTerminal: false,
+    terminalType: 'OPEN',
+  },
+  {
+    key: 'WON',
+    name: 'Won',
+    color: '#22C55E',
+    position: 4,
+    isSystem: true,
+    isTerminal: true,
+    terminalType: 'WON',
+  },
+  {
+    key: 'LOST',
+    name: 'Lost',
+    color: '#EF4444',
+    position: 5,
+    isSystem: true,
+    isTerminal: true,
+    terminalType: 'LOST',
+  },
+] as const;
+
+const normalizePipelineStageKey = (value?: string | null) =>
+  String(value || '')
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 40);
+
+const normalizePipelineStageLookupValue = (value?: string | null) =>
+  String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '');
+
+const sanitizePipelineStageColor = (value?: string | null, fallback = '#25D366') => {
+  const trimmed = String(value || '').trim();
+  return PIPELINE_STAGE_COLOR_REGEX.test(trimmed) ? trimmed : fallback;
+};
+
+const sortPipelineStages = <T extends { position: number; name: string }>(stages: T[]) =>
+  [...stages].sort((a, b) => a.position - b.position || a.name.localeCompare(b.name));
+
+const getFallbackPipelineStageKey = (
+  stages: Array<{ key: string; isTerminal?: boolean; terminalType?: string }>
+) =>
+  stages.find((stage) => !stage.isTerminal && stage.terminalType !== 'WON' && stage.terminalType !== 'LOST')?.key ||
+  stages[0]?.key ||
+  DEFAULT_PIPELINE_STAGE_KEY;
+
+const parseStageChangeMetadata = (activity: { metadata?: string | null; content?: string | null }) => {
+  const rawMetadata = String(activity.metadata || '').trim();
+  if (rawMetadata) {
+    try {
+      const parsed = JSON.parse(rawMetadata);
+      return {
+        previousStageKey: normalizePipelineStageKey(parsed.previousStageKey),
+        nextStageKey: normalizePipelineStageKey(parsed.nextStageKey),
+      };
+    } catch {
+      // Keep fallback parsing below for older activity log entries.
+    }
+  }
+
+  const content = String(activity.content || '');
+  const match = content.match(/from\s+([A-Z_]+)\s+to\s+([A-Z_]+)/i);
+  return {
+    previousStageKey: normalizePipelineStageKey(match?.[1]),
+    nextStageKey: normalizePipelineStageKey(match?.[2]),
+  };
+};
+
+const ensureWorkspacePipelineStages = async (workspaceId: string) => {
+  const existingCount = await prisma.workspacePipelineStage.count({
+    where: { workspaceId },
+  });
+
+  if (existingCount === 0) {
+    await prisma.workspacePipelineStage.createMany({
+      data: DEFAULT_WORKSPACE_PIPELINE_STAGES.map((stage) => ({
+        workspaceId,
+        key: stage.key,
+        name: stage.name,
+        color: stage.color,
+        position: stage.position,
+        isSystem: stage.isSystem,
+        isTerminal: stage.isTerminal,
+        terminalType: stage.terminalType,
+      })),
+    });
+  }
+
+  return prisma.workspacePipelineStage.findMany({
+    where: { workspaceId },
+    orderBy: [{ position: 'asc' }, { name: 'asc' }],
+  });
+};
+
+const getWorkspacePipelineStages = async (workspaceId: string) =>
+  sortPipelineStages(await ensureWorkspacePipelineStages(workspaceId));
+
+const resolvePipelineStageFromStages = (
+  stages: Array<{ key: string; name: string; isTerminal?: boolean; terminalType?: string }>,
+  value?: string | null,
+  fallbackValue?: string | null
+) => {
+  const fallbackKey =
+    normalizePipelineStageKey(fallbackValue) ||
+    getFallbackPipelineStageKey(stages);
+
+  const normalizedKey = normalizePipelineStageKey(value);
+  const normalizedLookup = normalizePipelineStageLookupValue(value);
+
+  const matchedStage =
+    stages.find((stage) => stage.key === normalizedKey) ||
+    stages.find(
+      (stage) =>
+        normalizePipelineStageLookupValue(stage.name) === normalizedLookup ||
+        normalizePipelineStageLookupValue(stage.key) === normalizedLookup
+    );
+
+  return matchedStage?.key || fallbackKey;
+};
+
+const resolveWorkspacePipelineStageValue = async (
+  workspaceId: string,
+  value?: string | null,
+  fallbackValue?: string | null
+) => resolvePipelineStageFromStages(await getWorkspacePipelineStages(workspaceId), value, fallbackValue);
+
+const buildUniqueWorkspacePipelineStageKey = (
+  stages: Array<{ key: string }>,
+  name?: string | null
+) => {
+  const baseKey = normalizePipelineStageKey(name) || 'STAGE';
+  const taken = new Set(stages.map((stage) => stage.key));
+
+  if (!taken.has(baseKey)) {
+    return baseKey;
+  }
+
+  let suffix = 2;
+  while (taken.has(`${baseKey}_${suffix}`)) {
+    suffix += 1;
+  }
+
+  return `${baseKey}_${suffix}`;
+};
+
+const INSTAGRAM_PROFILE_SYNC_TTL_MS = 6 * 60 * 60 * 1000;
+const INSTAGRAM_PROFILE_SYNC_MAX_RETRIES = 3;
+
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const isRetryableMetaProfileError = (error: any) => {
+  const status = Number(error?.response?.status || 0);
+  const code = Number(error?.response?.data?.error?.code || 0);
+
+  if (status === 429 || status >= 500) {
+    return true;
+  }
+
+  return [1, 2, 4].includes(code);
+};
+
+const logInstagramProfileHydrationError = (error: any, instagramScopedUserId: string) => {
+  const status = Number(error?.response?.status || 0);
+  const metaError = error?.response?.data?.error;
+  const code = Number(metaError?.code || 0);
+  const message = String(metaError?.message || error?.message || 'Unknown Meta error');
+
+  if (code === 190 || /access token/i.test(message)) {
+    console.error(`[instagram-profile-sync:token] ${instagramScopedUserId}`, metaError || message);
+    return;
+  }
+
+  if (code === 10 || code === 200 || /permission/i.test(message)) {
+    console.error(`[instagram-profile-sync:permission] ${instagramScopedUserId}`, metaError || message);
+    return;
+  }
+
+  if (/consent|blocked|not authorized|unsupported/i.test(message)) {
+    console.error(`[instagram-profile-sync:consent] ${instagramScopedUserId}`, metaError || message);
+    return;
+  }
+
+  console.error(
+    `[instagram-profile-sync:error] ${instagramScopedUserId} status=${status || 'unknown'}`,
+    metaError || message
+  );
+};
+
+const fetchInstagramContactProfile = async (
+  instagramScopedUserId?: string | null,
+  accessToken?: string | null,
+): Promise<{
+  username?: string | null;
+  name?: string | null;
+  profile_pic?: string | null;
+  follower_count?: number | null;
+  is_verified_user?: boolean | null;
+} | null> => {
+  const normalizedUserId = String(instagramScopedUserId || '').trim();
+  const normalizedToken = String(accessToken || '').trim();
+
+  if (!normalizedUserId || !normalizedToken) {
+    return null;
+  }
+
+  for (let attempt = 1; attempt <= INSTAGRAM_PROFILE_SYNC_MAX_RETRIES; attempt += 1) {
+    try {
+      const response = await axios.get(`https://graph.facebook.com/v21.0/${normalizedUserId}`, {
+        params: {
+          fields: 'username,name,profile_pic,follower_count,is_verified_user',
+          access_token: normalizedToken,
+        },
+        timeout: 10000,
+      });
+
+      return response.data || null;
+    } catch (error: any) {
+      const retryable = isRetryableMetaProfileError(error);
+
+      if (!retryable || attempt === INSTAGRAM_PROFILE_SYNC_MAX_RETRIES) {
+        logInstagramProfileHydrationError(error, normalizedUserId);
+        return null;
+      }
+
+      await wait(400 * attempt);
+    }
+  }
+
+  return null;
 };
 
 const hashSecureToken = (token: string) =>
@@ -720,15 +1047,17 @@ async function getWorkspaceBillingSummary(workspaceId: string) {
 }
 
 const getPlanLimitSnapshot = (plan?: string | null) =>
-  WORKSPACE_PLAN_LIMITS[(plan || '').toUpperCase()] || {
-    users: 1,
-    whatsapp: 1,
-    instagram: 1,
-    chatbots: 1,
-    contacts: 1000,
-    broadcasts: 500,
-    automations: 3,
-  };
+  applyChannelFeatureFlagsToPlanLimits(
+    WORKSPACE_PLAN_LIMITS[(plan || '').toUpperCase()] || {
+      users: 1,
+      whatsapp: 1,
+      instagram: 1,
+      chatbots: 1,
+      contacts: 1000,
+      broadcasts: 500,
+      automations: 3,
+    }
+  );
 
 const startOfDay = (value: Date) => {
   const date = new Date(value);
@@ -841,7 +1170,7 @@ async function getDashboardSections(workspaceId: string, query: any) {
     ...conversationWhere,
   };
 
-  const [workspace, contacts, conversations, unreadMessagesCount, failedMessagesCount, stageActivities, campaigns, billingSummary] =
+  const [workspace, workspacePipelineStages, contacts, conversations, unreadMessagesCount, failedMessagesCount, stageActivities, campaigns, billingSummary] =
     await Promise.all([
       prisma.workspace.findUnique({
         where: { id: workspaceId },
@@ -859,6 +1188,7 @@ async function getDashboardSections(workspaceId: string, query: any) {
           },
         },
       }),
+      getWorkspacePipelineStages(workspaceId),
       prisma.contact.findMany({
         where: contactWhere,
         select: {
@@ -941,6 +1271,7 @@ async function getDashboardSections(workspaceId: string, query: any) {
         select: {
           id: true,
           content: true,
+          metadata: true,
           createdAt: true,
         },
       }),
@@ -967,9 +1298,25 @@ async function getDashboardSections(workspaceId: string, query: any) {
     throw new Error('Workspace not found');
   }
 
+  const wonStageKeys = new Set(
+    workspacePipelineStages
+      .filter((stage) => String(stage.terminalType || '').toUpperCase() === 'WON')
+      .map((stage) => normalizePipelineStageKey(stage.key))
+  );
+  const lostStageKeys = new Set(
+    workspacePipelineStages
+      .filter((stage) => String(stage.terminalType || '').toUpperCase() === 'LOST')
+      .map((stage) => normalizePipelineStageKey(stage.key))
+  );
+  const terminalStageKeys = new Set(
+    workspacePipelineStages
+      .filter((stage) => stage.isTerminal || ['WON', 'LOST'].includes(String(stage.terminalType || '').toUpperCase()))
+      .map((stage) => normalizePipelineStageKey(stage.key))
+  );
+
   const contactsCreatedInRange = contacts.filter((contact) => isWithinRange(contact.createdAt, start, end));
   const activePipelineContacts = contacts.filter(
-    (contact) => !['WON', 'LOST'].includes((contact.pipelineStage || '').toUpperCase())
+    (contact) => !terminalStageKeys.has(normalizePipelineStageKey(contact.pipelineStage))
   );
   const staleContacts = activePipelineContacts.filter(
     (contact) => !contact.lastActivityAt || new Date(contact.lastActivityAt) < staleThreshold
@@ -996,8 +1343,12 @@ async function getDashboardSections(workspaceId: string, query: any) {
     })
     .filter((value): value is number => typeof value === 'number');
 
-  const dealsWon = stageActivities.filter((activity) => activity.content.includes(' to WON')).length;
-  const lostDealsInRange = stageActivities.filter((activity) => activity.content.includes(' to LOST')).length;
+  const dealsWon = stageActivities.filter((activity) =>
+    wonStageKeys.has(parseStageChangeMetadata(activity).nextStageKey)
+  ).length;
+  const lostDealsInRange = stageActivities.filter((activity) =>
+    lostStageKeys.has(parseStageChangeMetadata(activity).nextStageKey)
+  ).length;
   const pipelineValue = activePipelineContacts.reduce(
     (sum, contact) => sum + Number(contact.estimatedValue || 0),
     0
@@ -1019,11 +1370,13 @@ async function getDashboardSections(workspaceId: string, query: any) {
     )
   );
 
-  const pipelineStages = Object.entries(DASHBOARD_STAGE_LABELS).map(([stageId, label]) => {
-    const stageContacts = contacts.filter((contact) => (contact.pipelineStage || '').toUpperCase() === stageId);
+  const pipelineStages = workspacePipelineStages.map((stage) => {
+    const stageContacts = contacts.filter(
+      (contact) => normalizePipelineStageKey(contact.pipelineStage) === normalizePipelineStageKey(stage.key)
+    );
     return {
-      id: stageId,
-      label,
+      id: stage.key,
+      label: stage.name,
       count: stageContacts.length,
       value: toCurrency(
         stageContacts.reduce((sum, contact) => sum + Number(contact.estimatedValue || 0), 0)
@@ -1038,7 +1391,9 @@ async function getDashboardSections(workspaceId: string, query: any) {
   }
 
   const lostReasonMap = new Map<string, number>();
-  for (const contact of contacts.filter((item) => item.pipelineStage === 'LOST')) {
+  for (const contact of contacts.filter((item) =>
+    lostStageKeys.has(normalizePipelineStageKey(item.pipelineStage))
+  )) {
     const key = contact.lostReason?.trim() || 'Unknown';
     lostReasonMap.set(key, (lostReasonMap.get(key) || 0) + 1);
   }
@@ -1093,12 +1448,6 @@ async function getDashboardSections(workspaceId: string, query: any) {
       label: 'WhatsApp numbers',
       used: workspace.numbers.length,
       limit: planLimits.whatsapp,
-    },
-    {
-      key: 'instagram',
-      label: 'Instagram accounts',
-      used: workspace.instagramAccounts.length,
-      limit: planLimits.instagram,
     },
     {
       key: 'chatbots',
@@ -1196,7 +1545,9 @@ async function getDashboardSections(workspaceId: string, query: any) {
         }
       : null,
     workspace.numbers.filter((number) => number.status !== 'CONNECTED').length +
-      workspace.instagramAccounts.filter((account) => account.status !== 'CONNECTED').length >
+      (INSTAGRAM_INTEGRATION_ENABLED
+        ? workspace.instagramAccounts.filter((account) => account.status !== 'CONNECTED').length
+        : 0) >
     0
       ? {
           id: 'disconnected-channels',
@@ -1223,7 +1574,9 @@ async function getDashboardSections(workspaceId: string, query: any) {
   ].filter(Boolean);
 
   const connectedWhatsApp = workspace.numbers.filter((number) => number.status === 'CONNECTED').length;
-  const connectedInstagram = workspace.instagramAccounts.filter((account) => account.status === 'CONNECTED').length;
+  const connectedInstagram = INSTAGRAM_INTEGRATION_ENABLED
+    ? workspace.instagramAccounts.filter((account) => account.status === 'CONNECTED').length
+    : 0;
 
   return {
     meta: {
@@ -1291,7 +1644,9 @@ async function getDashboardSections(workspaceId: string, query: any) {
       enabledBots: workspace.chatbots.filter((chatbot) => chatbot.enabled).length,
       assignedChannels:
         workspace.numbers.filter((number) => number.chatbotId).length +
-        workspace.instagramAccounts.filter((account) => account.chatbotId).length,
+        (INSTAGRAM_INTEGRATION_ENABLED
+          ? workspace.instagramAccounts.filter((account) => account.chatbotId).length
+          : 0),
       aiMessagesSent: conversationsInRange.reduce(
         (sum, conversation) =>
           sum +
@@ -1318,7 +1673,9 @@ async function getDashboardSections(workspaceId: string, query: any) {
       whatsappConnected: connectedWhatsApp,
       whatsappDisconnected: workspace.numbers.length - connectedWhatsApp,
       instagramConnected: connectedInstagram,
-      instagramDisconnected: workspace.instagramAccounts.length - connectedInstagram,
+      instagramDisconnected: INSTAGRAM_INTEGRATION_ENABLED
+        ? workspace.instagramAccounts.length - connectedInstagram
+        : 0,
       usage: usageItems,
       aiSpend: billingSummary.aiSpend,
       creditBalance: billingSummary.balance,
@@ -1828,6 +2185,50 @@ async function startServer() {
   const requireSubscribedWorkspaceFromBody = async (req: any, res: any, next: any) =>
     requireSubscribedWorkspaceById(req, res, next, req.body.workspaceId || req.query.workspaceId);
 
+  const requireSubscribedWorkspaceManagerById = async (
+    req: any,
+    res: any,
+    next: any,
+    workspaceId?: string | null
+  ) => {
+    if (!workspaceId) {
+      return res.status(400).json({ error: 'Workspace is required' });
+    }
+
+    const membership = await prisma.workspaceMembership.findFirst({
+      where: {
+        workspaceId,
+        userId: req.user.userId,
+      },
+      include: {
+        workspace: true,
+      },
+    });
+
+    if (!membership) {
+      return res.status(403).json({ error: 'Workspace access denied' });
+    }
+
+    const user = await getUserByToken(req);
+    if (!user?.emailVerified) {
+      return res.status(403).json({ error: 'Verify your email before using this feature' });
+    }
+
+    if (!hasSubscription(membership.workspace.subscriptionStatus)) {
+      return res.status(403).json({ error: 'Subscribe to a plan to use this feature' });
+    }
+
+    if (!['OWNER', 'ADMIN'].includes(String(membership.role || '').toUpperCase())) {
+      return res.status(403).json({ error: 'Only workspace owners and admins can manage pipeline stages' });
+    }
+
+    req.workspaceMembership = membership;
+    next();
+  };
+
+  const requireSubscribedWorkspaceManagerFromBody = async (req: any, res: any, next: any) =>
+    requireSubscribedWorkspaceManagerById(req, res, next, req.body.workspaceId || req.query.workspaceId);
+
   const requireSubscribedConversation = async (req: any, res: any, next: any) => {
     const conversationId = req.body.conversationId || req.params.id;
     const conversation = await prisma.conversation.findUnique({ where: { id: conversationId } });
@@ -1927,6 +2328,107 @@ async function startServer() {
     });
   };
 
+  const instagramProfileHydrationQueue = new Set<string>();
+
+  const enqueueInstagramProfileHydration = ({
+    contactId,
+    workspaceId,
+    instagramScopedUserId,
+    accessToken,
+  }: {
+    contactId: string;
+    workspaceId: string;
+    instagramScopedUserId?: string | null;
+    accessToken?: string | null;
+  }) => {
+    const normalizedScopedUserId = String(instagramScopedUserId || '').trim();
+    const normalizedAccessToken = String(accessToken || '').trim();
+    if (!contactId || !workspaceId || !normalizedScopedUserId || !normalizedAccessToken) {
+      return;
+    }
+
+    const queueKey = `${workspaceId}:${contactId}:${normalizedScopedUserId}`;
+    if (instagramProfileHydrationQueue.has(queueKey)) {
+      return;
+    }
+
+    instagramProfileHydrationQueue.add(queueKey);
+
+    setTimeout(async () => {
+      try {
+        const currentContact = await prisma.contact.findUnique({
+          where: { id: contactId },
+          select: {
+            id: true,
+            name: true,
+            instagramUsername: true,
+            avatar: true,
+            lastProfileSyncAt: true,
+          },
+        });
+
+        if (!currentContact) {
+          return;
+        }
+
+        const hasCachedProfile =
+          Boolean(currentContact.instagramUsername?.trim()) ||
+          Boolean(currentContact.avatar?.trim()) ||
+          (Boolean(currentContact.name?.trim()) &&
+            currentContact.name.trim() !== getInstagramContactFallbackName(normalizedScopedUserId));
+
+        const lastSyncAgeMs = currentContact.lastProfileSyncAt
+          ? Date.now() - currentContact.lastProfileSyncAt.getTime()
+          : Number.POSITIVE_INFINITY;
+
+        if (hasCachedProfile && lastSyncAgeMs < INSTAGRAM_PROFILE_SYNC_TTL_MS) {
+          return;
+        }
+
+        const profile = await fetchInstagramContactProfile(normalizedScopedUserId, normalizedAccessToken);
+        if (!profile) {
+          return;
+        }
+
+        const updatedContact = await prisma.contact.update({
+          where: { id: contactId },
+          data: {
+            instagramScopedUserId: normalizedScopedUserId,
+            instagramId: normalizedScopedUserId,
+            instagramUsername: profile.username?.trim() || null,
+            name: profile.name?.trim() || getInstagramContactFallbackName(normalizedScopedUserId),
+            avatar: profile.profile_pic?.trim() || currentContact.avatar || null,
+            instagramFollowerCount:
+              typeof profile.follower_count === 'number' ? profile.follower_count : null,
+            instagramIsVerifiedUser:
+              typeof profile.is_verified_user === 'boolean' ? profile.is_verified_user : null,
+            lastProfileSyncAt: new Date(),
+          },
+        });
+
+        const relatedConversations = await prisma.conversation.findMany({
+          where: {
+            workspaceId,
+            contactId,
+          },
+          select: { id: true },
+        });
+
+        for (const conversation of relatedConversations) {
+          io.to(workspaceId).emit('conversation-updated', conversation.id);
+        }
+
+        io.to(workspaceId).emit('contact-updated', {
+          contactId: updatedContact.id,
+        });
+      } catch (error) {
+        console.error('[instagram-profile-sync:queue-failure]', error);
+      } finally {
+        instagramProfileHydrationQueue.delete(queueKey);
+      }
+    }, 0);
+  };
+
   const resolveContactListIds = async (workspaceId: string, listIds?: string[], listNames?: string[]) => {
     const resolvedIds = new Set((Array.isArray(listIds) ? listIds : []).filter(Boolean));
     const normalizedNames = Array.from(
@@ -1974,31 +2476,6 @@ async function startServer() {
       )
     );
 
-  const normalizePipelineStageValue = (value?: string | null) => {
-    const normalized = String(value || '')
-      .trim()
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '_')
-      .replace(/^_+|_+$/g, '');
-
-    if (!normalized) {
-      return 'NEW_LEAD';
-    }
-
-    const pipelineMap: Record<string, string> = {
-      new_lead: 'NEW_LEAD',
-      newlead: 'NEW_LEAD',
-      contacted: 'CONTACTED',
-      qualified: 'QUALIFIED',
-      quote_sent: 'QUOTE_SENT',
-      quotesent: 'QUOTE_SENT',
-      won: 'WON',
-      lost: 'LOST',
-    };
-
-    return pipelineMap[normalized] || 'NEW_LEAD';
-  };
-
   const getApiBaseUrl = (req: express.Request) =>
     (API_URL || process.env.APP_URL || `${req.protocol}://${req.get('host') || `localhost:${PORT}`}`).replace(/\/$/, '');
 
@@ -2007,6 +2484,9 @@ async function startServer() {
 
   const buildEmailVerificationUrl = (req: express.Request, token: string) =>
     `${getPublicAppBaseUrl(req)}/verify-email?token=${encodeURIComponent(token)}`;
+
+  const buildPasswordResetUrl = (req: express.Request, token: string) =>
+    `${getPublicAppBaseUrl(req)}/reset-password?token=${encodeURIComponent(token)}`;
 
   const sendEmailViaResend = async ({
     to,
@@ -2026,6 +2506,8 @@ async function startServer() {
       return {
         delivered: false,
         provider: 'preview',
+        configured: false,
+        error: 'Email delivery is not configured.',
       } as const;
     }
 
@@ -2046,17 +2528,21 @@ async function startServer() {
           },
         }
       );
-    } catch (error) {
+    } catch (error: any) {
       console.error('[email:resend]', error);
       return {
         delivered: false,
-        provider: 'preview',
+        provider: 'resend',
+        configured: true,
+        error: error?.response?.data?.message || 'Could not send email with Resend.',
       } as const;
     }
 
     return {
       delivered: true,
       provider: 'resend',
+      configured: true,
+      error: null,
     } as const;
   };
 
@@ -2115,13 +2601,93 @@ async function startServer() {
       text,
     });
 
+    if (!delivery.delivered && !EMAIL_LINK_PREVIEW_ENABLED) {
+      throw new Error(delivery.error || 'Could not send verification email.');
+    }
+
     return {
       emailSent: delivery.delivered,
       provider: delivery.provider,
-      verificationUrl: delivery.delivered ? undefined : verificationUrl,
+      verificationUrl: !delivery.delivered && EMAIL_LINK_PREVIEW_ENABLED ? verificationUrl : undefined,
       message: delivery.delivered
         ? 'Verification email sent. Check your inbox.'
-        : 'Email provider is not configured yet. Use the verification link below for testing.',
+        : delivery.configured
+          ? 'Email delivery failed locally. Use the verification link below for testing.'
+          : 'Email delivery is not configured locally. Use the verification link below for testing.',
+    };
+  };
+
+  const issuePasswordReset = async (
+    req: express.Request,
+    user: {
+      id: string;
+      email?: string | null;
+      name?: string | null;
+    }
+  ) => {
+    if (!user.email?.trim()) {
+      throw new Error('User email is required for password reset');
+    }
+
+    const { token, tokenHash } = createPasswordResetToken();
+    const expiresAt = new Date(Date.now() + 60 * 60 * 1000);
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        passwordResetTokenHash: tokenHash,
+        passwordResetExpiresAt: expiresAt,
+      },
+    });
+
+    const resetUrl = buildPasswordResetUrl(req, token);
+    const displayName = sanitizeDisplayName(user.name, user.email);
+    const subject = 'Reset your Tawasel App password';
+    const text = [
+      `Hi ${displayName},`,
+      '',
+      'We received a request to reset your password for Tawasel App.',
+      '',
+      `Reset your password: ${resetUrl}`,
+      '',
+      'This link expires in 1 hour.',
+      'If you did not request this, you can ignore this email.',
+    ].join('\n');
+
+    const html = `
+      <div style="font-family:Arial,sans-serif;line-height:1.6;color:#0f172a">
+        <p>Hi ${escapeHtml(displayName)},</p>
+        <p>We received a request to reset your password for Tawasel App.</p>
+        <p>
+          <a href="${escapeHtml(resetUrl)}" style="display:inline-block;background:#25D366;color:#ffffff;padding:12px 18px;border-radius:10px;text-decoration:none;font-weight:700">
+            Reset Password
+          </a>
+        </p>
+        <p style="font-size:14px;color:#475569">This link expires in 1 hour.</p>
+        <p style="font-size:14px;color:#475569">If you did not request this, you can ignore this email.</p>
+        <p style="font-size:14px;color:#475569">If the button does not work, copy this link:<br />${escapeHtml(resetUrl)}</p>
+      </div>
+    `;
+
+    const delivery = await sendEmailViaResend({
+      to: user.email,
+      subject,
+      html,
+      text,
+    });
+
+    if (!delivery.delivered && !EMAIL_LINK_PREVIEW_ENABLED) {
+      throw new Error(delivery.error || 'Could not send password reset email.');
+    }
+
+    return {
+      emailSent: delivery.delivered,
+      resetUrl: !delivery.delivered && EMAIL_LINK_PREVIEW_ENABLED ? resetUrl : undefined,
+      message: delivery.delivered
+        ? 'If the account exists, a password reset email has been sent.'
+        : delivery.configured
+          ? 'Email delivery failed locally. Use the reset link below for testing.'
+          : 'Email delivery is not configured locally. Use the reset link below for testing.',
     };
   };
 
@@ -2802,6 +3368,9 @@ async function startServer() {
 
     // Process incoming messages from Instagram
     if (body.object === "instagram") {
+      if (!INSTAGRAM_INTEGRATION_ENABLED) {
+        return res.sendStatus(200);
+      }
       const entry = body.entry?.[0];
       const messaging = entry?.messaging?.[0];
       const senderId = messaging?.sender?.id;
@@ -2821,7 +3390,10 @@ async function startServer() {
           let contact = await prisma.contact.findFirst({
             where: { 
               workspaceId: account.workspaceId,
-              instagramId: senderId
+              OR: [
+                { instagramScopedUserId: senderId },
+                { instagramId: senderId }
+              ]
             }
           });
 
@@ -2830,6 +3402,7 @@ async function startServer() {
               data: {
                 name: getInstagramContactFallbackName(senderId),
                 instagramId: senderId,
+                instagramScopedUserId: senderId,
                 workspaceId: account.workspaceId,
                 lastActivityAt: new Date(),
               }
@@ -2838,7 +3411,9 @@ async function startServer() {
             contact = await prisma.contact.update({
               where: { id: contact.id },
               data: {
-                name: contact.name?.trim() ? contact.name : getInstagramContactFallbackName(senderId),
+                instagramId: contact.instagramId || senderId,
+                instagramScopedUserId: contact.instagramScopedUserId || senderId,
+                name: contact.name?.trim() || getInstagramContactFallbackName(senderId),
                 lastActivityAt: new Date(),
               },
             });
@@ -2880,6 +3455,13 @@ async function startServer() {
           // Broadcast via Socket.io
           io.to(account.workspaceId).emit("new-message", newMsg);
           io.to(account.workspaceId).emit("conversation-updated", conversation.id);
+
+          enqueueInstagramProfileHydration({
+            contactId: contact.id,
+            workspaceId: account.workspaceId,
+            instagramScopedUserId: senderId,
+            accessToken: account.accessToken || process.env.INSTAGRAM_ACCESS_TOKEN || process.env.META_ACCESS_TOKEN || "",
+          });
 
           // Trigger AI Chatbot if enabled
           if (!conversation.aiPaused && account.chatbotId) {
@@ -2946,6 +3528,11 @@ async function startServer() {
       return res.status(400).json({ error: "Missing name, email or password" });
     }
 
+    const registrationValidationError = validateRegistrationInput({ name, email, password });
+    if (registrationValidationError) {
+      return res.status(400).json({ error: registrationValidationError });
+    }
+
     try {
       const existingUser = await prisma.user.findUnique({ where: { email } });
       if (existingUser) {
@@ -2990,7 +3577,7 @@ async function startServer() {
       res.json({ token, user: sanitizeUser(user), verification });
     } catch (e: any) {
       console.error('[auth:register]', e);
-      res.status(500).json({ error: 'Registration failed' });
+      res.status(500).json({ error: e?.message || 'Registration failed' });
     }
   });
 
@@ -3017,7 +3604,7 @@ async function startServer() {
       res.json({ success: true, user: sanitizeUser(user), ...verification });
     } catch (e: any) {
       console.error('[auth:verify-email]', e);
-      res.status(500).json({ error: 'Could not send verification email' });
+      res.status(500).json({ error: e?.message || 'Could not send verification email' });
     }
   });
 
@@ -3090,35 +3677,32 @@ async function startServer() {
   });
 
   app.post("/api/auth/forgot-password", authRateLimiter('forgot-password'), async (req, res) => {
-    const email = String(req.body?.email || '').trim().toLowerCase();
-    if (!email) {
-      return res.status(400).json({ error: "Email is required" });
-    }
+    try {
+      const email = String(req.body?.email || '').trim().toLowerCase();
+      if (!email) {
+        return res.status(400).json({ error: "Email is required" });
+      }
 
-    const user = await prisma.user.findUnique({ where: { email } });
-    if (user?.id) {
-      const { token, tokenHash } = createPasswordResetToken();
-      const expiresAt = new Date(Date.now() + 60 * 60 * 1000);
+      const user = await prisma.user.findUnique({ where: { email } });
+      if (!user?.id) {
+        return res.json({
+          success: true,
+          emailSent: false,
+          message: "If the account exists, a password reset email has been sent.",
+        });
+      }
 
-      await prisma.user.update({
-        where: { id: user.id },
-        data: {
-          passwordResetTokenHash: tokenHash,
-          passwordResetExpiresAt: expiresAt,
-        }
-      });
-
-      const appBaseUrl = getPublicAppBaseUrl(req);
-      const resetUrl = `${appBaseUrl}/reset-password?token=${token}`;
+      const reset = await issuePasswordReset(req, user);
       console.log(`[AUTH] Password reset requested for ${email} at ${new Date().toISOString()}`);
-      // TODO: send resetUrl via email provider. Do not expose or log tokens in responses.
-      void resetUrl;
-    }
 
-    res.json({
-      success: true,
-      message: "If the account exists, a reset link is ready.",
-    });
+      res.json({
+        success: true,
+        ...reset,
+      });
+    } catch (e: any) {
+      console.error('[auth:forgot-password]', e);
+      res.status(500).json({ error: e?.message || 'Could not send password reset email' });
+    }
   });
 
   app.get("/api/auth/reset-password/validate", async (req, res) => {
@@ -3346,8 +3930,12 @@ async function startServer() {
   // Inbox Routes
   app.get("/api/conversations", requireAuth, requireWorkspaceAccessFromQuery, async (req, res) => {
     const { workspaceId } = req.query;
+    const conversationWhere: any = { workspaceId: workspaceId as string };
+    if (!INSTAGRAM_INTEGRATION_ENABLED) {
+      conversationWhere.channelType = 'WHATSAPP';
+    }
     const conversations = await prisma.conversation.findMany({
-      where: { workspaceId: workspaceId as string },
+      where: conversationWhere,
       include: { 
         contact: true, 
         assignedTo: { select: { id: true, name: true, image: true } },
@@ -3358,6 +3946,26 @@ async function startServer() {
       },
       orderBy: { lastMessageAt: 'desc' }
     });
+
+    const unreadCounts = await prisma.message.groupBy({
+      by: ['conversationId'],
+      where: {
+        conversation: {
+          workspaceId: workspaceId as string,
+          ...(INSTAGRAM_INTEGRATION_ENABLED ? {} : { channelType: 'WHATSAPP' }),
+        },
+        direction: 'INCOMING',
+        isInternal: false,
+        readAt: null,
+      },
+      _count: {
+        _all: true,
+      },
+    });
+
+    const unreadCountByConversationId = new Map(
+      unreadCounts.map((entry) => [entry.conversationId, entry._count._all])
+    );
 
     // Mark breached conversations
     const now = new Date();
@@ -3371,7 +3979,12 @@ async function startServer() {
       }
     }
 
-    res.json(conversations);
+    res.json(
+      conversations.map((conversation) => ({
+        ...conversation,
+        unreadCount: unreadCountByConversationId.get(conversation.id) || 0,
+      }))
+    );
   });
 
   app.get("/api/conversations/:id", requireAuth, requireConversationAccess, async (req, res) => {
@@ -3407,6 +4020,9 @@ async function startServer() {
         instagramAccount: { include: { chatbot: { select: { id: true, name: true, enabled: true } } } }
       }
     });
+    if (!conversation || (!INSTAGRAM_INTEGRATION_ENABLED && conversation.channelType !== 'WHATSAPP')) {
+      return res.status(404).json({ error: "Conversation not found" });
+    }
     res.json(conversation);
   });
 
@@ -3820,6 +4436,114 @@ async function startServer() {
     res.json(templates);
   });
 
+  app.get("/api/templates/session", requireAuth, requireWorkspaceAccessFromQuery, async (req, res) => {
+    const { workspaceId } = req.query;
+    const templates = await prisma.sessionTemplate.findMany({
+      where: { workspaceId: workspaceId as string },
+      orderBy: { name: 'asc' }
+    });
+    res.json(templates);
+  });
+
+  app.post("/api/templates/session", requireAuth, requireSubscribedWorkspaceFromBody, async (req, res) => {
+    const workspaceId = String(req.body.workspaceId || '').trim();
+    const name = String(req.body.name || '').trim();
+    const content = String(req.body.content || '').trim();
+
+    if (!workspaceId) {
+      return res.status(400).json({ error: "Workspace is required" });
+    }
+
+    if (name.length < 2 || name.length > 80) {
+      return res.status(400).json({ error: "Template name must be between 2 and 80 characters" });
+    }
+
+    if (!content) {
+      return res.status(400).json({ error: "Template content is required" });
+    }
+
+    if (content.length > 2000) {
+      return res.status(400).json({ error: "Template content must be 2000 characters or fewer" });
+    }
+
+    const template = await prisma.sessionTemplate.create({
+      data: {
+        workspaceId,
+        name,
+        content
+      }
+    });
+
+    res.json(template);
+  });
+
+  app.patch("/api/templates/session/:id", requireAuth, async (req, res, next) => {
+    const existingTemplate = await prisma.sessionTemplate.findUnique({
+      where: { id: String(req.params.id || '').trim() }
+    });
+
+    if (!existingTemplate) {
+      return res.status(404).json({ error: "Template not found" });
+    }
+
+    return requireSubscribedWorkspaceById(req, res, next, existingTemplate.workspaceId);
+  }, async (req, res) => {
+    const templateId = String(req.params.id || '').trim();
+
+    if (!templateId) {
+      return res.status(400).json({ error: "Template is required" });
+    }
+
+    const name = String(req.body.name || '').trim();
+    const content = String(req.body.content || '').trim();
+
+    if (name.length < 2 || name.length > 80) {
+      return res.status(400).json({ error: "Template name must be between 2 and 80 characters" });
+    }
+
+    if (!content) {
+      return res.status(400).json({ error: "Template content is required" });
+    }
+
+    if (content.length > 2000) {
+      return res.status(400).json({ error: "Template content must be 2000 characters or fewer" });
+    }
+
+    const template = await prisma.sessionTemplate.update({
+      where: { id: templateId },
+      data: {
+        name,
+        content
+      }
+    });
+
+    res.json(template);
+  });
+
+  app.delete("/api/templates/session/:id", requireAuth, async (req, res, next) => {
+    const existingTemplate = await prisma.sessionTemplate.findUnique({
+      where: { id: String(req.params.id || '').trim() }
+    });
+
+    if (!existingTemplate) {
+      return res.status(404).json({ error: "Template not found" });
+    }
+
+    return requireSubscribedWorkspaceById(req, res, next, existingTemplate.workspaceId);
+  }, async (req, res) => {
+    const templateId = String(req.params.id || '').trim();
+
+    if (!templateId) {
+      return res.status(400).json({ error: "Template is required" });
+    }
+
+    await prisma.sessionTemplate.delete({
+      where: { id: templateId }
+    });
+
+    res.json({ success: true });
+  });
+
   // Numbers
   app.get("/api/numbers", requireAuth, requireWorkspaceAccessFromQuery, async (req, res) => {
     const { workspaceId } = req.query;
@@ -3832,6 +4556,9 @@ async function startServer() {
 
   // Instagram Accounts
   app.get("/api/instagram/accounts", requireAuth, requireWorkspaceAccessFromQuery, async (req, res) => {
+    if (!INSTAGRAM_INTEGRATION_ENABLED) {
+      return res.json([]);
+    }
     const { workspaceId } = req.query;
     const accounts = await prisma.instagramAccount.findMany({
       where: { workspaceId: workspaceId as string },
@@ -3841,6 +4568,9 @@ async function startServer() {
   });
 
   app.post("/api/instagram/accounts", requireAuth, requireSubscribedWorkspaceFromBody, async (req, res) => {
+    if (!INSTAGRAM_INTEGRATION_ENABLED) {
+      return res.status(403).json({ error: "Instagram is not enabled in this release" });
+    }
     const { workspaceId, name, instagramId, username } = req.body;
     if (!(await enforceWorkspacePlanLimit(res, workspaceId, 'instagram'))) {
       return;
@@ -4222,6 +4952,196 @@ async function startServer() {
     res.json({ success: true });
   });
 
+  // Pipeline stages
+  app.get("/api/pipeline-stages", requireAuth, requireWorkspaceAccessFromQuery, async (req, res) => {
+    const workspaceId = String(req.query.workspaceId || '').trim();
+    if (!workspaceId) {
+      return res.status(400).json({ error: "Workspace is required" });
+    }
+
+    const stages = await getWorkspacePipelineStages(workspaceId);
+    res.json(stages);
+  });
+
+  app.post("/api/pipeline-stages", requireAuth, requireSubscribedWorkspaceManagerFromBody, async (req, res) => {
+    const workspaceId = String(req.body.workspaceId || '').trim();
+    const name = String(req.body.name || '').trim();
+    const color = sanitizePipelineStageColor(req.body.color, '#25D366');
+
+    if (!workspaceId) {
+      return res.status(400).json({ error: "Workspace is required" });
+    }
+
+    if (name.length < 2 || name.length > 40) {
+      return res.status(400).json({ error: "Stage name must be between 2 and 40 characters" });
+    }
+
+    const existingStages = await getWorkspacePipelineStages(workspaceId);
+    const key = buildUniqueWorkspacePipelineStageKey(existingStages, name);
+    const position = existingStages.length;
+
+    const stage = await prisma.workspacePipelineStage.create({
+      data: {
+        workspaceId,
+        key,
+        name,
+        color,
+        position,
+        isSystem: false,
+        isTerminal: false,
+        terminalType: 'OPEN',
+      },
+    });
+
+    res.json(stage);
+  });
+
+  app.patch("/api/pipeline-stages/:id", requireAuth, requireSubscribedWorkspaceManagerFromBody, async (req, res) => {
+    const workspaceId = String(req.body.workspaceId || '').trim();
+    const stageId = String(req.params.id || '').trim();
+    const name = req.body.name === undefined ? undefined : String(req.body.name || '').trim();
+    const color = req.body.color === undefined ? undefined : sanitizePipelineStageColor(req.body.color);
+
+    if (!workspaceId || !stageId) {
+      return res.status(400).json({ error: "Workspace and stage are required" });
+    }
+
+    const existingStage = await prisma.workspacePipelineStage.findFirst({
+      where: {
+        id: stageId,
+        workspaceId,
+      },
+    });
+
+    if (!existingStage) {
+      return res.status(404).json({ error: "Pipeline stage not found" });
+    }
+
+    if (name !== undefined && (name.length < 2 || name.length > 40)) {
+      return res.status(400).json({ error: "Stage name must be between 2 and 40 characters" });
+    }
+
+    const updatedStage = await prisma.workspacePipelineStage.update({
+      where: { id: stageId },
+      data: {
+        name: name === undefined ? undefined : name,
+        color: color === undefined ? undefined : color,
+      },
+    });
+
+    res.json(updatedStage);
+  });
+
+  app.post("/api/pipeline-stages/reorder", requireAuth, requireSubscribedWorkspaceManagerFromBody, async (req, res) => {
+    const workspaceId = String(req.body.workspaceId || '').trim();
+    const orderedStageIds = Array.isArray(req.body.orderedStageIds)
+      ? req.body.orderedStageIds.map((id: unknown) => String(id || '').trim()).filter(Boolean)
+      : [];
+
+    if (!workspaceId) {
+      return res.status(400).json({ error: "Workspace is required" });
+    }
+
+    const stages = await getWorkspacePipelineStages(workspaceId);
+    const currentIds = stages.map((stage) => stage.id);
+
+    if (
+      orderedStageIds.length !== currentIds.length ||
+      currentIds.some((id) => !orderedStageIds.includes(id))
+    ) {
+      return res.status(400).json({ error: "Provide the full ordered stage list" });
+    }
+
+    await prisma.$transaction(
+      orderedStageIds.map((stageId, index) =>
+        prisma.workspacePipelineStage.update({
+          where: { id: stageId },
+          data: { position: index },
+        })
+      )
+    );
+
+    res.json(await getWorkspacePipelineStages(workspaceId));
+  });
+
+  app.delete("/api/pipeline-stages/:id", requireAuth, requireSubscribedWorkspaceManagerFromBody, async (req, res) => {
+    const workspaceId = String(req.body.workspaceId || req.query.workspaceId || '').trim();
+    const stageId = String(req.params.id || '').trim();
+
+    if (!workspaceId || !stageId) {
+      return res.status(400).json({ error: "Workspace and stage are required" });
+    }
+
+    const existingStage = await prisma.workspacePipelineStage.findFirst({
+      where: {
+        id: stageId,
+        workspaceId,
+      },
+    });
+
+    if (!existingStage) {
+      return res.status(404).json({ error: "Pipeline stage not found" });
+    }
+
+    const allStages = await getWorkspacePipelineStages(workspaceId);
+    const remainingStages = sortPipelineStages(allStages.filter((stage) => stage.id !== stageId));
+
+    if (remainingStages.length === 0) {
+      return res.status(400).json({ error: "Keep at least one stage in the pipeline" });
+    }
+
+    const remainingOpenStages = remainingStages.filter(
+      (stage) => !stage.isTerminal && stage.terminalType === 'OPEN'
+    );
+
+    if (remainingOpenStages.length === 0) {
+      return res.status(400).json({ error: "Keep at least one open stage for new leads" });
+    }
+
+    const existingIndex = allStages.findIndex((stage) => stage.id === stageId);
+    const replacementStage =
+      remainingStages[existingIndex] ||
+      remainingStages[existingIndex - 1] ||
+      remainingOpenStages[0] ||
+      remainingStages[0];
+
+    const contactsUsingStage = await prisma.contact.count({
+      where: {
+        workspaceId,
+        pipelineStage: existingStage.key,
+      },
+    });
+
+    await prisma.$transaction([
+      prisma.contact.updateMany({
+        where: {
+          workspaceId,
+          pipelineStage: existingStage.key,
+        },
+        data: {
+          pipelineStage: replacementStage.key,
+          lastActivityAt: new Date(),
+        },
+      }),
+      prisma.workspacePipelineStage.delete({
+        where: { id: stageId },
+      }),
+      ...remainingStages.map((stage, index) =>
+        prisma.workspacePipelineStage.update({
+          where: { id: stage.id },
+          data: { position: index },
+        })
+      ),
+    ]);
+
+    res.json({
+      success: true,
+      replacementStageKey: replacementStage.key,
+      replacementStageName: replacementStage.name,
+      reassignedCount: contactsUsingStage,
+    });
+  });
+
   // Contacts / CRM
   app.get("/api/contacts", requireAuth, requireWorkspaceAccessFromQuery, async (req, res) => {
     const { workspaceId } = req.query;
@@ -4252,6 +5172,7 @@ async function startServer() {
     }
 
     const resolvedListIds = await resolveContactListIds(workspaceId, listIds, listNames);
+    const resolvedPipelineStage = await resolveWorkspacePipelineStageValue(workspaceId, pipelineStage);
 
     if (!(await enforceWorkspacePlanLimit(res, workspaceId, 'contacts'))) {
       return;
@@ -4263,7 +5184,7 @@ async function startServer() {
         name: name?.trim() || phoneNumber?.trim() || instagramUsername?.trim() || 'New Contact',
         phoneNumber: phoneNumber?.trim() || null,
         instagramUsername: instagramUsername?.trim() || null,
-        pipelineStage: pipelineStage || 'NEW_LEAD',
+        pipelineStage: resolvedPipelineStage,
         city: city?.trim() || null,
         estimatedValue: Number(estimatedValue || 0) || 0,
         lostReason: lostReason?.trim() || null,
@@ -4341,8 +5262,10 @@ async function startServer() {
       return res.status(400).json({ error: "Map a phone number column before importing" });
     }
 
+    const workspacePipelineStages = await getWorkspacePipelineStages(workspaceId);
+
     const importDefaults = {
-      pipelineStage: normalizePipelineStageValue(defaults?.pipelineStage),
+      pipelineStage: resolvePipelineStageFromStages(workspacePipelineStages, defaults?.pipelineStage),
       leadSource: defaults?.leadSource?.trim() || '',
       listNames: Array.from(
         new Set((Array.isArray(defaults?.listNames) ? defaults?.listNames : []).map((name) => String(name).trim()).filter(Boolean))
@@ -4437,7 +5360,11 @@ async function startServer() {
       const existing = existingByPhone.get(normalizedPhone);
       const nextName = nameValue || existing?.name || formattedPhone;
       const nextLeadSource = leadSourceValue || importDefaults.leadSource || existing?.leadSource || null;
-      const nextPipelineStage = normalizePipelineStageValue(pipelineStageValue || importDefaults.pipelineStage || existing?.pipelineStage);
+      const nextPipelineStage = resolvePipelineStageFromStages(
+        workspacePipelineStages,
+        pipelineStageValue || importDefaults.pipelineStage || existing?.pipelineStage,
+        existing?.pipelineStage || importDefaults.pipelineStage
+      );
 
       if (existing) {
         if (duplicateMode === 'skip') {
@@ -4541,6 +5468,10 @@ async function startServer() {
     const { pipelineStage, name, phoneNumber, city, leadSource, tags, notes, assignedToId, listIds, listNames, estimatedValue, lostReason } = req.body;
     const oldContact = await prisma.contact.findUnique({ where: { id: req.params.id } });
 
+    if (!oldContact) {
+      return res.status(404).json({ error: "Contact not found" });
+    }
+
     const shouldSyncLists = Array.isArray(listIds) || Array.isArray(listNames);
 
     if (shouldSyncLists) {
@@ -4552,11 +5483,22 @@ async function startServer() {
     const resolvedListIds = shouldSyncLists
       ? await resolveContactListIds(oldContact?.workspaceId || '', listIds, listNames)
       : [];
+    const workspacePipelineStages = await getWorkspacePipelineStages(oldContact.workspaceId);
+    const resolvedPipelineStage =
+      pipelineStage === undefined
+        ? undefined
+        : resolvePipelineStageFromStages(workspacePipelineStages, pipelineStage, oldContact.pipelineStage);
+    const oldStage = workspacePipelineStages.find(
+      (stage) => stage.key === normalizePipelineStageKey(oldContact.pipelineStage)
+    );
+    const newStage = workspacePipelineStages.find(
+      (stage) => stage.key === normalizePipelineStageKey(resolvedPipelineStage)
+    );
 
     const contact = await prisma.contact.update({
       where: { id: req.params.id },
       data: {
-        pipelineStage,
+        pipelineStage: resolvedPipelineStage,
         name,
         phoneNumber,
         city,
@@ -4580,13 +5522,17 @@ async function startServer() {
       }
     });
 
-    if (pipelineStage && pipelineStage !== oldContact?.pipelineStage) {
+    if (resolvedPipelineStage && resolvedPipelineStage !== oldContact?.pipelineStage) {
       await prisma.activityLog.create({
         data: {
           type: 'STAGE_CHANGE',
-          content: `Lead stage changed from ${oldContact?.pipelineStage} to ${pipelineStage}`,
+          content: `Lead stage changed from ${oldStage?.name || oldContact.pipelineStage} to ${newStage?.name || resolvedPipelineStage}`,
           contactId: contact.id,
-          workspaceId: contact.workspaceId
+          workspaceId: contact.workspaceId,
+          metadata: JSON.stringify({
+            previousStageKey: oldContact.pipelineStage,
+            nextStageKey: resolvedPipelineStage,
+          }),
         }
       });
     }

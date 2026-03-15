@@ -5,6 +5,12 @@ import { Loader2, Search, Plus, Users, Tags, CheckSquare, Square, Upload, Downlo
 import { toast } from 'sonner';
 import { cn } from '../lib/utils';
 import ContactListPicker from '../components/ContactListPicker';
+import {
+  DEFAULT_PIPELINE_STAGE_KEY,
+  getFallbackPipelineStageKey,
+  getPipelineStageLabel,
+  PipelineStage,
+} from '../lib/pipelineStages';
 
 interface ContactList {
   id: string;
@@ -32,7 +38,7 @@ type CsvImportRow = Record<string, string>;
 
 const CSV_TEMPLATE = `name,phone,lead_source,pipeline_stage,custom_lists
 Ahmed Hassan,+971551112222,Website,NEW_LEAD,"Abu Dhabi, VIP"
-Sarah Miller,+971553334444,Instagram,CONTACTED,"Dubai"`;
+Sarah Miller,+971553334444,WhatsApp Referral,CONTACTED,"Dubai"`;
 
 const normalizeColumnKey = (value: string) =>
   value
@@ -120,6 +126,7 @@ export default function Contacts() {
   const { activeWorkspace, hasFullAccess } = useApp();
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [lists, setLists] = useState<ContactList[]>([]);
+  const [pipelineStages, setPipelineStages] = useState<PipelineStage[]>([]);
   const [selectedListId, setSelectedListId] = useState<'ALL' | string>('ALL');
   const [selectedContactIds, setSelectedContactIds] = useState<string[]>([]);
   const [bulkListNames, setBulkListNames] = useState<string[]>([]);
@@ -144,7 +151,7 @@ export default function Contacts() {
     listNames: '',
   });
   const [importDefaults, setImportDefaults] = useState({
-    pipelineStage: 'NEW_LEAD',
+    pipelineStage: DEFAULT_PIPELINE_STAGE_KEY,
     leadSource: '',
     listNames: [] as string[],
     duplicateMode: 'merge' as 'merge' | 'skip',
@@ -152,7 +159,7 @@ export default function Contacts() {
   const [contactForm, setContactForm] = useState({
     name: '',
     phoneNumber: '',
-    pipelineStage: 'NEW_LEAD',
+    pipelineStage: DEFAULT_PIPELINE_STAGE_KEY,
     leadSource: '',
     listNames: [] as string[]
   });
@@ -162,6 +169,7 @@ export default function Contacts() {
     if (!activeWorkspace) {
       setContacts([]);
       setLists([]);
+      setPipelineStages([]);
       setSelectedContactIds([]);
       setSelectedListId('ALL');
       setIsLoading(false);
@@ -170,7 +178,7 @@ export default function Contacts() {
 
     setIsLoading(true);
     setError(null);
-    Promise.all([fetchContacts(), fetchLists()])
+    Promise.all([fetchContacts(), fetchLists(), fetchPipelineStages()])
       .catch((loadError: any) => {
         const message =
           loadError?.response?.data?.error ||
@@ -179,6 +187,21 @@ export default function Contacts() {
       })
       .finally(() => setIsLoading(false));
   }, [activeWorkspace]);
+
+  useEffect(() => {
+    if (pipelineStages.length === 0) return;
+    const fallbackStageKey = getFallbackPipelineStageKey(pipelineStages);
+    setContactForm((prev) =>
+      pipelineStages.some((stage) => stage.key === prev.pipelineStage)
+        ? prev
+        : { ...prev, pipelineStage: fallbackStageKey }
+    );
+    setImportDefaults((prev) =>
+      pipelineStages.some((stage) => stage.key === prev.pipelineStage)
+        ? prev
+        : { ...prev, pipelineStage: fallbackStageKey }
+    );
+  }, [pipelineStages]);
 
   const fetchContacts = async () => {
     const res = await axios.get(`/api/contacts?workspaceId=${activeWorkspace?.id}`);
@@ -202,6 +225,11 @@ export default function Contacts() {
     );
   };
 
+  const fetchPipelineStages = async () => {
+    const res = await axios.get(`/api/pipeline-stages?workspaceId=${activeWorkspace?.id}`);
+    setPipelineStages(Array.isArray(res.data) ? res.data : []);
+  };
+
   const filteredContacts = useMemo(() => {
     const query = search.trim().toLowerCase();
     return contacts.filter((contact) => {
@@ -211,7 +239,6 @@ export default function Contacts() {
         !query ||
         (contact.name || '').toLowerCase().includes(query) ||
         (contact.phoneNumber || '').toLowerCase().includes(query) ||
-        (contact.instagramUsername || '').toLowerCase().includes(query) ||
         (contact.leadSource || '').toLowerCase().includes(query) ||
         contact.listMemberships?.some((membership) => membership.list.name.toLowerCase().includes(query));
 
@@ -234,7 +261,13 @@ export default function Contacts() {
         ...contactForm
       });
       setContacts((prev) => [res.data, ...prev]);
-      setContactForm({ name: '', phoneNumber: '', pipelineStage: 'NEW_LEAD', leadSource: '', listNames: [] });
+      setContactForm({
+        name: '',
+        phoneNumber: '',
+        pipelineStage: getFallbackPipelineStageKey(pipelineStages),
+        leadSource: '',
+        listNames: [],
+      });
       setShowContactModal(false);
       await fetchLists();
       toast.success('Contact saved');
@@ -310,7 +343,7 @@ export default function Contacts() {
       listNames: '',
     });
     setImportDefaults({
-      pipelineStage: 'NEW_LEAD',
+      pipelineStage: getFallbackPipelineStageKey(pipelineStages),
       leadSource: '',
       listNames: [],
       duplicateMode: 'merge',
@@ -662,7 +695,7 @@ export default function Contacts() {
                       </button>
                     </td>
                     <td className="px-4 py-4 font-medium">{contact.name || '-'}</td>
-                    <td className="px-4 py-4">{contact.phoneNumber || contact.instagramUsername || '-'}</td>
+                    <td className="px-4 py-4">{contact.phoneNumber || '-'}</td>
                     <td className="px-4 py-4">{contact.leadSource || 'Direct Search'}</td>
                     <td className="px-4 py-4">
                       <div className="flex flex-wrap gap-2">
@@ -741,12 +774,9 @@ export default function Contacts() {
                 onChange={(e) => setContactForm((prev) => ({ ...prev, pipelineStage: e.target.value }))}
                 className="w-full rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm font-semibold outline-none focus:border-[#25D366] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
               >
-                <option value="NEW_LEAD">New Lead</option>
-                <option value="CONTACTED">Contacted</option>
-                <option value="QUALIFIED">Qualified</option>
-                <option value="QUOTE_SENT">Quote Sent</option>
-                <option value="WON">Won</option>
-                <option value="LOST">Lost</option>
+                {pipelineStages.map((stage) => (
+                  <option key={stage.id} value={stage.key}>{stage.name}</option>
+                ))}
               </select>
             </div>
             <div className="mt-6 flex justify-end gap-3">
@@ -937,12 +967,9 @@ export default function Contacts() {
                       onChange={(e) => setImportDefaults((prev) => ({ ...prev, pipelineStage: e.target.value }))}
                       className="w-full rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm font-medium outline-none focus:border-[#25D366] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                     >
-                      <option value="NEW_LEAD">New Lead</option>
-                      <option value="CONTACTED">Contacted</option>
-                      <option value="QUALIFIED">Qualified</option>
-                      <option value="QUOTE_SENT">Quote Sent</option>
-                      <option value="WON">Won</option>
-                      <option value="LOST">Lost</option>
+                      {pipelineStages.map((stage) => (
+                        <option key={stage.id} value={stage.key}>{stage.name}</option>
+                      ))}
                     </select>
                   </label>
 
@@ -1004,7 +1031,7 @@ export default function Contacts() {
                             <td className="px-3 py-2">{row.name || '-'}</td>
                             <td className="px-3 py-2">{row.phoneNumber || '-'}</td>
                             <td className="px-3 py-2">{row.leadSource || '-'}</td>
-                            <td className="px-3 py-2">{row.pipelineStage || '-'}</td>
+                            <td className="px-3 py-2">{row.pipelineStage ? getPipelineStageLabel(pipelineStages, row.pipelineStage) : '-'}</td>
                             <td className="px-3 py-2">{row.listNames || (importDefaults.listNames.length > 0 ? importDefaults.listNames.join(', ') : '-')}</td>
                           </tr>
                         )) : (

@@ -8,6 +8,7 @@ export default function ForgotPassword() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
+  const [emailSent, setEmailSent] = useState(false);
   const [resetUrl, setResetUrl] = useState('');
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -15,11 +16,13 @@ export default function ForgotPassword() {
     setIsSubmitting(true);
     setError('');
     setMessage('');
+    setEmailSent(false);
     setResetUrl('');
 
     try {
       const res = await axios.post('/api/auth/forgot-password', { email });
-      setMessage(res.data?.message || 'If the account exists, a reset link is ready.');
+      setMessage(res.data?.message || 'If the account exists, a password reset email has been sent.');
+      setEmailSent(Boolean(res.data?.emailSent));
       setResetUrl(res.data?.resetUrl || '');
     } catch (err: any) {
       setError(err.response?.data?.error || 'Could not start password reset');
@@ -37,7 +40,7 @@ export default function ForgotPassword() {
           </div>
           <h1 className="text-2xl font-semibold text-gray-900 dark:text-white">Reset your password</h1>
           <p className="mt-2 text-gray-500 dark:text-gray-400">
-            Enter your email and we&apos;ll prepare a secure reset link for you.
+            Enter your email and we&apos;ll send a secure reset link for you.
           </p>
         </div>
 
@@ -86,6 +89,11 @@ export default function ForgotPassword() {
                   </button>
                 </div>
               )}
+              {message && emailSent && !resetUrl ? (
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Check your inbox and spam folder for the reset email.
+                </p>
+              ) : null}
             </div>
           )}
 

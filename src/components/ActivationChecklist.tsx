@@ -40,14 +40,12 @@ export default function ActivationChecklist({ className }: { className?: string 
     let isMounted = true;
     Promise.all([
       axios.get(`/api/numbers?workspaceId=${activeWorkspace.id}`),
-      axios.get(`/api/instagram/accounts?workspaceId=${activeWorkspace.id}`),
       axios.get(`/api/chatbots?workspaceId=${activeWorkspace.id}`),
-    ]).then(([numbersRes, instagramRes, chatbotsRes]) => {
+    ]).then(([numbersRes, chatbotsRes]) => {
       if (!isMounted) return;
       const numbers = Array.isArray(numbersRes.data) ? numbersRes.data.length : 0;
-      const instagrams = Array.isArray(instagramRes.data) ? instagramRes.data.length : 0;
       const bots = Array.isArray(chatbotsRes.data) ? chatbotsRes.data.length : 0;
-      setChannelCount(numbers + instagrams);
+      setChannelCount(numbers);
       setChatbotCount(bots);
     }).catch((error) => {
       console.error('Failed to load activation checklist data', error);
@@ -100,8 +98,8 @@ export default function ActivationChecklist({ className }: { className?: string 
     },
     {
       id: 'channel',
-      title: 'Connect a channel',
-      description: 'Add your first WhatsApp number or Instagram account to start receiving conversations.',
+      title: 'Connect WhatsApp',
+      description: 'Add your first WhatsApp number to start receiving conversations.',
       complete: hasActiveSubscription && (channelCount || 0) > 0,
       ctaLabel: hasActiveSubscription && (channelCount || 0) === 0 ? 'Open channels' : undefined,
       ctaHref: hasActiveSubscription && (channelCount || 0) === 0 ? '/app/channels' : undefined,

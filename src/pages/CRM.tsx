@@ -11,12 +11,23 @@ import {
   Filter,
   ArrowLeft,
   ArrowRight,
-  Check
+  Check,
+  ArrowUp,
+  ArrowDown,
+  Settings2,
+  Trash2
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { motion } from 'motion/react';
 import { toast } from 'sonner';
 import ContactListPicker from '../components/ContactListPicker';
+import {
+  DEFAULT_PIPELINE_STAGE_KEY,
+  getFallbackPipelineStageKey,
+  getPipelineStageLabel,
+  PipelineStage,
+  PIPELINE_STAGE_COLOR_OPTIONS,
+} from '../lib/pipelineStages';
 
 interface Contact {
   id: string;
@@ -32,15 +43,6 @@ interface ContactList {
   name: string;
 }
 
-const STAGES = [
-  { id: 'NEW_LEAD', label: 'New Lead', color: 'bg-blue-500' },
-  { id: 'CONTACTED', label: 'Contacted', color: 'bg-indigo-500' },
-  { id: 'QUALIFIED', label: 'Qualified', color: 'bg-purple-500' },
-  { id: 'QUOTE_SENT', label: 'Quote Sent', color: 'bg-orange-500' },
-  { id: 'WON', label: 'Won', color: 'bg-green-500' },
-  { id: 'LOST', label: 'Lost', color: 'bg-red-500' },
-];
-
 const formatAed = (value?: number | null) =>
   new Intl.NumberFormat('en-AE', {
     style: 'currency',
@@ -52,6 +54,11 @@ export default function CRM() {
   const { activeWorkspace } = useApp();
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [lists, setLists] = useState<ContactList[]>([]);
+  const [pipelineStages, setPipelineStages] = useState<PipelineStage[]>([]);
+  const [showManageStages, setShowManageStages] = useState(false);
+  const [isSavingStages, setIsSavingStages] = useState(false);
+  const [newStage, setNewStage] = useState({ name: '', color: PIPELINE_STAGE_COLOR_OPTIONS[0] });
+  const [stageDrafts, setStageDrafts] = useState<Record<string, { name: string; color: string }>>({});
   const [isLoading, setIsLoading] = useState(true);
   const [showAddLead, setShowAddLead] = useState(false);
   const [isSavingLead, setIsSavingLead] = useState(false);
@@ -59,7 +66,7 @@ export default function CRM() {
     name: '',
     phoneNumber: '',
     listNames: [] as string[],
-    pipelineStage: 'NEW_LEAD',
+    pipelineStage: DEFAULT_PIPELINE_STAGE_KEY,
     estimatedValue: ''
   });
   const [valueDrafts, setValueDrafts] = useState<Record<string, string>>({});
@@ -70,9 +77,16 @@ export default function CRM() {
   const [valueFilter, setValueFilter] = useState<'ALL' | 'WITH_VALUE' | 'NO_VALUE'>('ALL');
 
   useEffect(() => {
-    if (activeWorkspace) {
-      fetchContacts();
+    if (!activeWorkspace) {
+      setContacts([]);
+      setLists([]);
+      setPipelineStages([]);
+      setIsLoading(false);
+      return;
     }
+
+    setIsLoading(true);
+    Promise.all([fetchContacts(), fetchLists(), fetchPipelineStages()]).finally(() => setIsLoading(false));
   }, [activeWorkspace]);
 
   const fetchContacts = async () => {
@@ -81,8 +95,6 @@ export default function CRM() {
       setContacts(Array.isArray(res.data) ? res.data : []);
     } catch (error) {
       console.error('Failed to fetch contacts', error);
-    } finally {
-      setIsLoading(false);
     }
   };
 
@@ -96,10 +108,35 @@ export default function CRM() {
   };
 
   useEffect(() => {
-    if (activeWorkspace) {
-      fetchLists();
+    if (pipelineStages.length > 0) {
+      const fallbackStageKey = getFallbackPipelineStageKey(pipelineStages);
+      setNewLead((prev) =>
+        pipelineStages.some((stage) => stage.key === prev.pipelineStage)
+          ? prev
+          : { ...prev, pipelineStage: fallbackStageKey }
+      );
     }
-  }, [activeWorkspace]);
+  }, [pipelineStages]);
+
+  const fetchPipelineStages = async () => {
+    try {
+      const res = await axios.get(`/api/pipeline-stages?workspaceId=${activeWorkspace?.id}`);
+      const nextStages = Array.isArray(res.data) ? res.data : [];
+      setPipelineStages(nextStages);
+      setStageDrafts(
+        nextStages.reduce<Record<string, { name: string; color: string }>>((acc, stage) => {
+          acc[stage.id] = {
+            name: stage.name,
+            color: stage.color,
+          };
+          return acc;
+        }, {})
+      );
+    } catch (error) {
+      console.error('Failed to fetch pipeline stages', error);
+      toast.error('Could not load pipeline stages');
+    }
+  };
 
   useEffect(() => {
     setValueDrafts((prev) => {
@@ -166,7 +203,13 @@ export default function CRM() {
         estimatedValue: newLead.estimatedValue.trim() ? Number(newLead.estimatedValue) : undefined,
       });
       setContacts(prev => [res.data, ...prev]);
-      setNewLead({ name: '', phoneNumber: '', listNames: [], pipelineStage: 'NEW_LEAD', estimatedValue: '' });
+      setNewLead({
+        name: '',
+        phoneNumber: '',
+        listNames: [],
+        pipelineStage: getFallbackPipelineStageKey(pipelineStages),
+        estimatedValue: '',
+      });
       await fetchLists();
       setShowAddLead(false);
       toast.success('Lead saved');
@@ -190,7 +233,7 @@ export default function CRM() {
         !normalizedQuery ||
         contact.name?.toLowerCase().includes(normalizedQuery) ||
         contact.phoneNumber?.toLowerCase().includes(normalizedQuery) ||
-        STAGES.find((stage) => stage.id === contact.pipelineStage)?.label.toLowerCase().includes(normalizedQuery);
+        getPipelineStageLabel(pipelineStages, contact.pipelineStage).toLowerCase().includes(normalizedQuery);
 
       const hasChat = Boolean(contact.conversations?.[0]);
       const matchesChat =
@@ -333,6 +376,14 @@ export default function CRM() {
             )}
           </div>
           <button
+            type="button"
+            onClick={() => setShowManageStages(true)}
+            className="flex items-center gap-2 px-4 py-2 border border-gray-200 dark:border-slate-700 text-gray-700 dark:text-gray-200 text-sm font-bold rounded-xl hover:border-[#25D366] hover:text-[#25D366] transition-colors bg-white dark:bg-slate-900"
+          >
+            <Settings2 className="w-4 h-4" />
+            Manage Stages
+          </button>
+          <button
             onClick={() => {
               fetchLists();
               setShowAddLead(true);
@@ -390,8 +441,8 @@ export default function CRM() {
                 onChange={(e) => setNewLead(prev => ({ ...prev, pipelineStage: e.target.value }))}
                 className="w-full rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm font-semibold text-gray-700 outline-none focus:border-[#25D366] dark:border-slate-700 dark:bg-slate-800 dark:text-gray-200"
               >
-                {STAGES.map((stage) => (
-                  <option key={stage.id} value={stage.id}>{stage.label}</option>
+                {pipelineStages.map((stage) => (
+                  <option key={stage.id} value={stage.key}>{stage.name}</option>
                 ))}
               </select>
             </div>
@@ -418,14 +469,14 @@ export default function CRM() {
 
       <div className="flex-1 overflow-x-auto p-8">
         <div className="flex gap-6 h-full min-w-max">
-          {STAGES.map((stage) => (
+          {pipelineStages.map((stage) => (
             <div key={stage.id} className="w-72 flex flex-col gap-4">
               <div className="flex items-center justify-between px-1">
                 <div className="flex items-center gap-2">
-                  <div className={cn("w-2 h-2 rounded-full", stage.color)} />
-                  <h3 className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-widest">{stage.label}</h3>
+                  <div className="w-2 h-2 rounded-full" style={{ backgroundColor: stage.color }} />
+                  <h3 className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-widest">{stage.name}</h3>
                   <span className="text-[10px] font-bold text-gray-400 dark:text-gray-500 bg-gray-100 dark:bg-slate-800 px-1.5 py-0.5 rounded transition-colors">
-                    {filteredContacts.filter(c => c.pipelineStage === stage.id).length}
+                    {filteredContacts.filter(c => c.pipelineStage === stage.key).length}
                   </span>
                 </div>
                 <button className="text-gray-300 hover:text-gray-500">
@@ -435,7 +486,7 @@ export default function CRM() {
 
               <div className="flex-1 bg-gray-100/50 dark:bg-slate-900/50 rounded-2xl p-3 space-y-3 overflow-y-auto border border-dashed border-gray-200 dark:border-slate-800 transition-colors">
                 {filteredContacts
-                  .filter(c => c.pipelineStage === stage.id)
+                  .filter(c => c.pipelineStage === stage.key)
                   .map((contact) => (
                     <motion.div
                       layoutId={contact.id}
@@ -443,9 +494,9 @@ export default function CRM() {
                       className="bg-white dark:bg-slate-800 p-4 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700 group hover:border-[#25D366]/30 transition-all cursor-pointer"
                     >
                       {(() => {
-                        const stageIndex = STAGES.findIndex(s => s.id === stage.id);
-                        const previousStage = stageIndex > 0 ? STAGES[stageIndex - 1] : null;
-                        const nextStage = stageIndex < STAGES.length - 1 ? STAGES[stageIndex + 1] : null;
+                        const stageIndex = pipelineStages.findIndex(s => s.key === stage.key);
+                        const previousStage = stageIndex > 0 ? pipelineStages[stageIndex - 1] : null;
+                        const nextStage = stageIndex < pipelineStages.length - 1 ? pipelineStages[stageIndex + 1] : null;
 
                         return (
                           <>
@@ -458,10 +509,10 @@ export default function CRM() {
                             <button 
                               onClick={(e) => {
                                 e.stopPropagation();
-                                updateStage(contact.id, previousStage.id);
+                                updateStage(contact.id, previousStage.key);
                               }}
                               className="p-1 hover:bg-gray-50 dark:hover:bg-slate-700 rounded text-gray-300 hover:text-[#25D366] transition-colors"
-                              title={`Move to ${previousStage.label}`}
+                              title={`Move to ${previousStage.name}`}
                             >
                               <ArrowLeft className="w-3 h-3" />
                             </button>
@@ -470,10 +521,10 @@ export default function CRM() {
                             <button 
                               onClick={(e) => {
                                 e.stopPropagation();
-                                updateStage(contact.id, nextStage.id);
+                                updateStage(contact.id, nextStage.key);
                               }}
                               className="p-1 hover:bg-gray-50 dark:hover:bg-slate-700 rounded text-gray-300 hover:text-[#25D366] transition-colors"
-                              title={`Move to ${nextStage.label}`}
+                              title={`Move to ${nextStage.name}`}
                             >
                               <ArrowRight className="w-3 h-3" />
                             </button>
@@ -548,7 +599,7 @@ export default function CRM() {
                       })()}
                     </motion.div>
                   ))}
-                {filteredContacts.filter(c => c.pipelineStage === stage.id).length === 0 && (
+                {filteredContacts.filter(c => c.pipelineStage === stage.key).length === 0 && (
                   <div className="h-32 flex flex-col items-center justify-center text-center p-4 border-2 border-dashed border-gray-200 dark:border-slate-800 rounded-xl">
                     <p className="text-[10px] font-medium text-gray-400 dark:text-gray-600 uppercase tracking-tighter">
                       {hasActiveFilters ? 'No matching leads' : 'No leads here'}
@@ -560,6 +611,219 @@ export default function CRM() {
           ))}
         </div>
       </div>
+
+      {showManageStages && (
+        <div className="absolute inset-0 z-30 flex items-center justify-center bg-slate-950/35 p-4">
+          <div className="w-full max-w-4xl rounded-3xl border border-gray-100 bg-white p-6 shadow-2xl dark:border-slate-800 dark:bg-slate-900">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2 className="text-lg font-bold text-gray-900 dark:text-white">Manage CRM Stages</h2>
+                <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                  Customize one pipeline for this workspace by renaming stages, changing colors, reordering them, and adding custom steps.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowManageStages(false)}
+                className="rounded-2xl px-3 py-2 text-sm font-semibold text-gray-500 transition-colors hover:bg-gray-100 dark:hover:bg-slate-800"
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="mt-6 max-h-[60vh] overflow-y-auto rounded-3xl border border-gray-100 dark:border-slate-800">
+              <div className="divide-y divide-gray-100 dark:divide-slate-800">
+                {pipelineStages.map((stage, index) => (
+                  <div key={stage.id} className="grid gap-3 p-4 md:grid-cols-[minmax(0,1fr)_120px_auto_auto] md:items-center">
+                    <div>
+                      <div className="mb-2 flex items-center gap-2">
+                        <span className="inline-flex h-2.5 w-2.5 rounded-full" style={{ backgroundColor: stageDrafts[stage.id]?.color || stage.color }} />
+                        <span className="text-xs font-bold uppercase tracking-widest text-gray-400 dark:text-gray-500">
+                          {stage.isSystem ? 'Default stage' : 'Custom stage'}
+                        </span>
+                        {stage.isTerminal && (
+                          <span className="rounded-full bg-gray-100 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-gray-600 dark:bg-slate-800 dark:text-gray-300">
+                            {stage.terminalType}
+                          </span>
+                        )}
+                      </div>
+                      <input
+                        type="text"
+                        value={stageDrafts[stage.id]?.name || stage.name}
+                        onChange={(e) =>
+                          setStageDrafts((prev) => ({
+                            ...prev,
+                            [stage.id]: {
+                              name: e.target.value,
+                              color: prev[stage.id]?.color || stage.color,
+                            },
+                          }))
+                        }
+                        className="w-full rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm font-semibold text-gray-900 outline-none focus:border-[#25D366] focus:ring-2 focus:ring-[#25D366]/20 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                      />
+                    </div>
+                    <input
+                      type="color"
+                      value={stageDrafts[stage.id]?.color || stage.color}
+                      onChange={(e) =>
+                        setStageDrafts((prev) => ({
+                          ...prev,
+                          [stage.id]: {
+                            name: prev[stage.id]?.name || stage.name,
+                            color: e.target.value,
+                          },
+                        }))
+                      }
+                      className="h-12 w-full rounded-2xl border border-gray-200 bg-white px-2 py-2 dark:border-slate-700 dark:bg-slate-900"
+                    />
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        disabled={isSavingStages || index === 0}
+                        onClick={async () => {
+                          setIsSavingStages(true);
+                          try {
+                            const orderedStageIds = [...pipelineStages];
+                            [orderedStageIds[index - 1], orderedStageIds[index]] = [orderedStageIds[index], orderedStageIds[index - 1]];
+                            await axios.post('/api/pipeline-stages/reorder', {
+                              workspaceId: activeWorkspace?.id,
+                              orderedStageIds: orderedStageIds.map((item) => item.id),
+                            });
+                            await fetchPipelineStages();
+                          } catch (error: any) {
+                            toast.error(error?.response?.data?.error || 'Could not move stage');
+                          } finally {
+                            setIsSavingStages(false);
+                          }
+                        }}
+                        className="rounded-xl border border-gray-200 p-2 text-gray-500 transition-colors hover:border-[#25D366] hover:text-[#25D366] disabled:opacity-40 dark:border-slate-700"
+                      >
+                        <ArrowUp className="h-4 w-4" />
+                      </button>
+                      <button
+                        type="button"
+                        disabled={isSavingStages || index === pipelineStages.length - 1}
+                        onClick={async () => {
+                          setIsSavingStages(true);
+                          try {
+                            const orderedStageIds = [...pipelineStages];
+                            [orderedStageIds[index], orderedStageIds[index + 1]] = [orderedStageIds[index + 1], orderedStageIds[index]];
+                            await axios.post('/api/pipeline-stages/reorder', {
+                              workspaceId: activeWorkspace?.id,
+                              orderedStageIds: orderedStageIds.map((item) => item.id),
+                            });
+                            await fetchPipelineStages();
+                          } catch (error: any) {
+                            toast.error(error?.response?.data?.error || 'Could not move stage');
+                          } finally {
+                            setIsSavingStages(false);
+                          }
+                        }}
+                        className="rounded-xl border border-gray-200 p-2 text-gray-500 transition-colors hover:border-[#25D366] hover:text-[#25D366] disabled:opacity-40 dark:border-slate-700"
+                      >
+                        <ArrowDown className="h-4 w-4" />
+                      </button>
+                    </div>
+                    <div className="flex items-center justify-end gap-2">
+                      <button
+                        type="button"
+                        disabled={isSavingStages}
+                        onClick={async () => {
+                          setIsSavingStages(true);
+                          try {
+                            await axios.patch(`/api/pipeline-stages/${stage.id}`, {
+                              workspaceId: activeWorkspace?.id,
+                              name: stageDrafts[stage.id]?.name || stage.name,
+                              color: stageDrafts[stage.id]?.color || stage.color,
+                            });
+                            await fetchPipelineStages();
+                            toast.success('Stage updated');
+                          } catch (error: any) {
+                            toast.error(error?.response?.data?.error || 'Could not update stage');
+                          } finally {
+                            setIsSavingStages(false);
+                          }
+                        }}
+                        className="rounded-xl bg-[#25D366] px-3 py-2 text-xs font-bold text-white transition-colors hover:bg-[#128C7E] disabled:opacity-50"
+                      >
+                        Save
+                      </button>
+                      <button
+                        type="button"
+                        disabled={isSavingStages}
+                        onClick={async () => {
+                          setIsSavingStages(true);
+                          try {
+                            const res = await axios.delete(`/api/pipeline-stages/${stage.id}`, {
+                              data: { workspaceId: activeWorkspace?.id },
+                            });
+                            await fetchPipelineStages();
+                            if (res.data?.reassignedCount > 0) {
+                              toast.success(`Stage removed. ${res.data.reassignedCount} lead${res.data.reassignedCount === 1 ? '' : 's'} moved to ${res.data.replacementStageName}.`);
+                            } else {
+                              toast.success('Stage removed');
+                            }
+                          } catch (error: any) {
+                            toast.error(error?.response?.data?.error || 'Could not remove stage');
+                          } finally {
+                            setIsSavingStages(false);
+                          }
+                        }}
+                        className="rounded-xl border border-red-200 p-2 text-red-500 transition-colors hover:bg-red-50 disabled:opacity-50 dark:border-red-900/40"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="mt-6 rounded-3xl border border-dashed border-gray-200 bg-gray-50 p-4 dark:border-slate-700 dark:bg-slate-950/50">
+              <p className="text-sm font-bold text-gray-900 dark:text-white">Add custom stage</p>
+              <div className="mt-3 grid gap-3 md:grid-cols-[minmax(0,1fr)_120px_auto]">
+                <input
+                  type="text"
+                  value={newStage.name}
+                  onChange={(e) => setNewStage((prev) => ({ ...prev, name: e.target.value }))}
+                  placeholder="For example: Follow Up Needed"
+                  className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm font-semibold text-gray-900 outline-none focus:border-[#25D366] focus:ring-2 focus:ring-[#25D366]/20 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                />
+                <input
+                  type="color"
+                  value={newStage.color}
+                  onChange={(e) => setNewStage((prev) => ({ ...prev, color: e.target.value }))}
+                  className="h-12 w-full rounded-2xl border border-gray-200 bg-white px-2 py-2 dark:border-slate-700 dark:bg-slate-900"
+                />
+                <button
+                  type="button"
+                  disabled={isSavingStages || !newStage.name.trim()}
+                  onClick={async () => {
+                    setIsSavingStages(true);
+                    try {
+                      await axios.post('/api/pipeline-stages', {
+                        workspaceId: activeWorkspace?.id,
+                        name: newStage.name,
+                        color: newStage.color,
+                      });
+                      setNewStage({ name: '', color: PIPELINE_STAGE_COLOR_OPTIONS[0] });
+                      await fetchPipelineStages();
+                      toast.success('Stage added');
+                    } catch (error: any) {
+                      toast.error(error?.response?.data?.error || 'Could not add stage');
+                    } finally {
+                      setIsSavingStages(false);
+                    }
+                  }}
+                  className="rounded-2xl bg-[#25D366] px-4 py-3 text-sm font-bold text-white transition-colors hover:bg-[#128C7E] disabled:opacity-50"
+                >
+                  Add Stage
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -51,20 +51,11 @@ export interface PlanConfig {
   };
 }
 
-export interface EnterprisePlan {
-  name: string;
-  shortLabel: string;
-  audience: string;
-  description: string;
-  ctaLabel: string;
-  cardHighlights: string[];
-}
-
 export interface ComparisonGroup {
   title: string;
   rows: Array<{
     label: string;
-    values: Record<PlanType | 'ENTERPRISE', ComparisonValue>;
+    values: Record<PlanType, ComparisonValue>;
   }>;
 }
 
@@ -74,8 +65,8 @@ export const PLANS: Record<PlanType, PlanConfig> = {
   STARTER: {
     name: 'Starter',
     shortLabel: 'For solo operators',
-    audience: 'Ideal for solo founders, freelancers, and small shops that need to look professional on WhatsApp fast.',
-    description: 'Professionalize your customer messaging, stop missing leads, and keep every inquiry in one place.',
+    audience: 'Ideal for solo founders, clinics, and service businesses that need a clean WhatsApp workflow without hiring a full team yet.',
+    description: 'Run WhatsApp sales, support, and follow-up from one place without missing leads or relying on personal phones.',
     price: 99,
     annualPrice: 79,
     annualBilledPrice: 948,
@@ -96,26 +87,26 @@ export const PLANS: Record<PlanType, PlanConfig> = {
     supportLabel: 'Email support (48-hour response)',
     analyticsLabel: 'Basic dashboard',
     cardHighlights: [
-      '1 WhatsApp number and 1 Instagram inbox',
-      'Up to 1,000 contacts in your CRM',
-      '500 broadcast messages per month',
+      '1 WhatsApp number connection',
+      'Shared WhatsApp team inbox',
+      'Up to 1,000 WhatsApp CRM contacts',
+      '500 WhatsApp broadcast messages per month',
       '1 AI assistant for after-hours replies',
-      'Basic sales pipeline and performance dashboard',
-      '6 months of conversation history',
+      'Basic sales pipeline and 6 months of WhatsApp conversation history',
     ],
     billingHighlights: [
       '1 user',
-      '1 WhatsApp number + 1 Instagram account',
-      '1,000 contacts',
-      '500 broadcasts per month',
+      '1 WhatsApp number',
+      '1,000 WhatsApp CRM contacts',
+      '500 WhatsApp broadcasts per month',
       '3 automations',
-      'Basic analytics and 6-month history',
+      'Basic analytics and 6-month conversation history',
     ],
     valueProps: [
-      'Shared inbox for WhatsApp and Instagram',
-      'Basic CRM pipeline to track deals',
-      'After-hours AI auto-replies',
-      'Essential visibility on leads and response time',
+      'Shared WhatsApp inbox for one operator or desk',
+      'Basic WhatsApp CRM pipeline to track leads',
+      'After-hours AI WhatsApp auto-replies',
+      'Essential visibility on response time and follow-up',
     ],
     comparison: {
       teamRoles: false,
@@ -138,14 +129,14 @@ export const PLANS: Record<PlanType, PlanConfig> = {
   GROWTH: {
     name: 'Growth',
     shortLabel: 'For small teams ready to scale',
-    audience: 'Best for clinics, schools, salons, agencies, and sales teams that need collaboration and automation.',
-    description: 'Give your whole team one inbox, automate follow-ups, and track revenue with a stronger CRM workflow.',
+    audience: 'Best for clinics, academies, sales teams, and service businesses that need a stronger shared WhatsApp workflow.',
+    description: 'Give your whole team one WhatsApp operating system with automation, lead routing, and clearer follow-up ownership.',
     price: 279,
     annualPrice: 219,
     annualBilledPrice: 2628,
     stripePriceId: 'price_1T9WoUI1cBVPBGgu1kSpUzUa',
     annualStripePriceId: null,
-    whatsappLimit: 2,
+    whatsappLimit: 3,
     instagramLimit: 1,
     chatbotLimit: 3,
     userLimit: 5,
@@ -161,26 +152,26 @@ export const PLANS: Record<PlanType, PlanConfig> = {
     analyticsLabel: 'Full dashboard',
     highlight: true,
     cardHighlights: [
-      'Up to 5 users for one shared team inbox',
-      '2 WhatsApp numbers for branches or departments',
-      '5,000 contacts with full CRM profiles',
-      '3,000 scheduled broadcast messages per month',
+      'Up to 3 WhatsApp number connections',
+      'Shared WhatsApp inbox for up to 5 users',
+      '5,000 WhatsApp CRM contacts',
+      '3,000 WhatsApp broadcast messages per month',
       '3 AI assistants for sales, support, and after-hours',
-      '15 workflow automations with lead routing and reminders',
+      'Workflow automations, reminders, and stronger lead tracking',
     ],
     billingHighlights: [
       'Up to 5 users',
-      '2 WhatsApp numbers + 1 Instagram account',
-      '5,000 contacts',
-      '3,000 broadcasts per month',
+      'Up to 3 WhatsApp numbers',
+      '5,000 WhatsApp CRM contacts',
+      '3,000 WhatsApp broadcasts per month',
       '15 automations',
-      'Full analytics, team roles, and 12-month history',
+      'Full analytics, team roles, and 12-month conversation history',
     ],
     valueProps: [
-      'Conversation assignment and priority tags',
-      'Lead scoring, notes, and custom date filters',
-      'Campaign reporting and team workload visibility',
-      'Import/export contacts and schedule broadcasts',
+      'WhatsApp lead capture, assignment, and priority tags',
+      'Notes, reminders, and clearer lead tracking',
+      'WhatsApp broadcast reporting and team workload visibility',
+      'Import contacts and schedule WhatsApp campaigns',
     ],
     comparison: {
       teamRoles: true,
@@ -203,8 +194,8 @@ export const PLANS: Record<PlanType, PlanConfig> = {
   PRO: {
     name: 'Pro',
     shortLabel: 'For established multi-branch teams',
-    audience: 'Built for larger SMEs that need advanced analytics, multiple pipelines, stronger support, and deeper integrations.',
-    description: 'Run high-volume operations with advanced reporting, more channels, more automation, and dedicated account support.',
+    audience: 'Built for larger teams and branch-based operations that need serious WhatsApp throughput, structure, and reporting.',
+    description: 'Run high-volume WhatsApp operations with advanced automation, API access, and reporting for multi-team execution.',
     price: 549,
     annualPrice: 439,
     annualBilledPrice: 5268,
@@ -225,25 +216,25 @@ export const PLANS: Record<PlanType, PlanConfig> = {
     supportLabel: 'Dedicated account manager plus WhatsApp support (4-hour response)',
     analyticsLabel: 'Advanced analytics and revenue reporting',
     cardHighlights: [
-      'Up to 10 users across multiple teams or branches',
-      '5 WhatsApp numbers and 2 Instagram accounts',
-      '25,000 contacts with deal tracking and forecasting',
-      '10,000 broadcast messages per month',
+      'Up to 5 WhatsApp number connections',
+      'Multi-team and branch-ready operations',
+      '25,000 WhatsApp CRM contacts',
+      '10,000 WhatsApp broadcast messages per month',
       '10 AI assistants with advanced routing',
-      'Unlimited automations, API access, and 24-month history',
+      'Unlimited automations, API access, advanced analytics, and longer history',
     ],
     billingHighlights: [
       'Up to 10 users',
-      '5 WhatsApp numbers + 2 Instagram accounts',
-      '25,000 contacts',
-      '10,000 broadcasts per month',
+      'Up to 5 WhatsApp numbers',
+      '25,000 WhatsApp CRM contacts',
+      '10,000 WhatsApp broadcasts per month',
       'Unlimited automations and custom fields',
-      'Advanced analytics, API access, and 24-month history',
+      'Advanced analytics, API access, and 24-month conversation history',
     ],
     valueProps: [
-      'Multiple sales pipelines with forecasting',
+      'Multi-team WhatsApp operations with forecasting',
       'Revenue reports, conversion funnels, and exports',
-      'API and webhook access for integrations',
+      'API and webhook access for custom workflows',
       'Dedicated account management for serious operations',
     ],
     comparison: {
@@ -266,22 +257,8 @@ export const PLANS: Record<PlanType, PlanConfig> = {
   },
 };
 
-export const ENTERPRISE_PLAN: EnterprisePlan = {
-  name: 'Enterprise',
-  shortLabel: 'For 10+ users with custom needs',
-  audience: 'For multi-brand companies, agencies, or operations that need custom onboarding, SLA guarantees, and deeper security.',
-  description: 'Custom onboarding, custom integrations, and a dedicated success path for teams that need more than an off-the-shelf plan.',
-  ctaLabel: 'Contact Sales',
-  cardHighlights: [
-    'Unlimited users and contacts',
-    'Custom API integrations and SLA-backed support',
-    'Dedicated onboarding and success manager',
-    'Advanced security, custom reporting, and multi-brand setups',
-  ],
-};
-
 export const PRICING_VALUE_STATEMENT =
-  'Tawasel helps teams reply faster, convert more leads, and save hours every week on manual follow-ups.';
+  'Tawasel helps teams reply faster on WhatsApp, convert more leads, and save hours every week on manual follow-ups.';
 
 export const PRICING_TRUST_SIGNALS = [
   'No hidden fees',
@@ -309,7 +286,7 @@ export const PRICING_FAQ = [
   {
     question: 'How long does setup take?',
     answer:
-      'Most teams can connect channels, import contacts, and start replying in less than 30 minutes once the hosted deployment is ready.',
+      'Most teams can connect their WhatsApp number, import contacts, and start replying in less than 30 minutes once the hosted deployment is ready.',
   },
   {
     question: 'Do you support Arabic?',
@@ -332,68 +309,64 @@ export const PRICING_ADD_ONS = [
 
 export const PRICING_COMPARISON_GROUPS: ComparisonGroup[] = [
   {
-    title: 'Channels and Team',
+    title: 'WhatsApp Operations and Team',
     rows: [
       {
-        label: 'WhatsApp numbers',
-        values: { STARTER: 1, GROWTH: 2, PRO: 5, ENTERPRISE: 'Unlimited' },
-      },
-      {
-        label: 'Instagram accounts',
-        values: { STARTER: 1, GROWTH: 1, PRO: 2, ENTERPRISE: 'Unlimited' },
+        label: 'WhatsApp number connections',
+        values: { STARTER: 1, GROWTH: 3, PRO: 5 },
       },
       {
         label: 'Users included',
-        values: { STARTER: 1, GROWTH: 5, PRO: 10, ENTERPRISE: 'Unlimited' },
+        values: { STARTER: 1, GROWTH: 5, PRO: 10 },
       },
       {
         label: 'Team roles and permissions',
-        values: { STARTER: false, GROWTH: true, PRO: true, ENTERPRISE: true },
+        values: { STARTER: false, GROWTH: true, PRO: true },
       },
       {
-        label: 'Auto-assignment rules',
-        values: { STARTER: false, GROWTH: true, PRO: true, ENTERPRISE: true },
+        label: 'WhatsApp lead routing',
+        values: { STARTER: false, GROWTH: true, PRO: true },
       },
       {
         label: 'Agent workload view',
-        values: { STARTER: false, GROWTH: true, PRO: true, ENTERPRISE: true },
+        values: { STARTER: false, GROWTH: true, PRO: true },
       },
     ],
   },
   {
-    title: 'CRM and Messaging',
+    title: 'WhatsApp CRM and Messaging',
     rows: [
       {
-        label: 'Contacts',
-        values: { STARTER: '1,000', GROWTH: '5,000', PRO: '25,000', ENTERPRISE: 'Unlimited' },
+        label: 'WhatsApp CRM contacts',
+        values: { STARTER: '1,000', GROWTH: '5,000', PRO: '25,000' },
       },
       {
         label: 'Sales pipelines',
-        values: { STARTER: 1, GROWTH: 1, PRO: 3, ENTERPRISE: 'Unlimited' },
+        values: { STARTER: 1, GROWTH: 1, PRO: 3 },
       },
       {
         label: 'Pipeline stages',
-        values: { STARTER: 5, GROWTH: 'Unlimited', PRO: 'Unlimited', ENTERPRISE: 'Unlimited' },
+        values: { STARTER: 5, GROWTH: 'Unlimited', PRO: 'Unlimited' },
       },
       {
         label: 'Lead scoring',
-        values: { STARTER: false, GROWTH: true, PRO: true, ENTERPRISE: true },
+        values: { STARTER: false, GROWTH: true, PRO: true },
       },
       {
         label: 'Deal value tracking',
-        values: { STARTER: false, GROWTH: true, PRO: true, ENTERPRISE: true },
+        values: { STARTER: false, GROWTH: true, PRO: true },
       },
       {
-        label: 'Broadcast messages / month',
-        values: { STARTER: '500', GROWTH: '3,000', PRO: '10,000', ENTERPRISE: 'Custom' },
+        label: 'WhatsApp broadcast messages / month',
+        values: { STARTER: '500', GROWTH: '3,000', PRO: '10,000' },
       },
       {
-        label: 'Broadcast scheduling',
-        values: { STARTER: false, GROWTH: true, PRO: true, ENTERPRISE: true },
+        label: 'WhatsApp broadcast scheduling',
+        values: { STARTER: false, GROWTH: true, PRO: true },
       },
       {
-        label: 'Quick-reply templates',
-        values: { STARTER: 10, GROWTH: 50, PRO: 'Unlimited', ENTERPRISE: 'Unlimited' },
+        label: 'WhatsApp quick replies',
+        values: { STARTER: 10, GROWTH: 50, PRO: 'Unlimited' },
       },
     ],
   },
@@ -402,47 +375,47 @@ export const PRICING_COMPARISON_GROUPS: ComparisonGroup[] = [
     rows: [
       {
         label: 'AI assistants',
-        values: { STARTER: 1, GROWTH: 3, PRO: 10, ENTERPRISE: 'Unlimited' },
+        values: { STARTER: 1, GROWTH: 3, PRO: 10 },
       },
       {
         label: 'Workflow automations',
-        values: { STARTER: 3, GROWTH: 15, PRO: 'Unlimited', ENTERPRISE: 'Unlimited' },
+        values: { STARTER: 3, GROWTH: 15, PRO: 'Unlimited' },
       },
       {
         label: 'Multi-language AI',
-        values: { STARTER: false, GROWTH: false, PRO: true, ENTERPRISE: true },
+        values: { STARTER: false, GROWTH: false, PRO: true },
       },
       {
-        label: 'Conversation history',
-        values: { STARTER: '6 months', GROWTH: '12 months', PRO: '24 months', ENTERPRISE: 'Unlimited' },
+        label: 'WhatsApp conversation history',
+        values: { STARTER: '6 months', GROWTH: '12 months', PRO: '24 months' },
       },
       {
         label: 'Revenue and conversion reports',
-        values: { STARTER: false, GROWTH: false, PRO: true, ENTERPRISE: true },
+        values: { STARTER: false, GROWTH: false, PRO: true },
       },
       {
         label: 'Custom date ranges',
-        values: { STARTER: false, GROWTH: true, PRO: true, ENTERPRISE: true },
+        values: { STARTER: false, GROWTH: true, PRO: true },
       },
       {
         label: 'Report exports',
-        values: { STARTER: false, GROWTH: false, PRO: true, ENTERPRISE: true },
+        values: { STARTER: false, GROWTH: false, PRO: true },
       },
       {
         label: 'Contact import/export',
-        values: { STARTER: false, GROWTH: true, PRO: true, ENTERPRISE: true },
+        values: { STARTER: false, GROWTH: true, PRO: true },
       },
       {
         label: 'API access',
-        values: { STARTER: false, GROWTH: false, PRO: true, ENTERPRISE: true },
+        values: { STARTER: false, GROWTH: false, PRO: true },
       },
       {
         label: 'Webhooks',
-        values: { STARTER: false, GROWTH: false, PRO: true, ENTERPRISE: true },
+        values: { STARTER: false, GROWTH: false, PRO: true },
       },
       {
         label: 'White-label widget',
-        values: { STARTER: false, GROWTH: false, PRO: 'Add-on', ENTERPRISE: true },
+        values: { STARTER: false, GROWTH: false, PRO: 'Add-on' },
       },
     ],
   },

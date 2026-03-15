@@ -61,6 +61,25 @@ model Workspace {
   tasks           Task[]
   activities      ActivityLog[]
   automationRules AutomationRule[]
+  pipelineStages  WorkspacePipelineStage[]
+}
+
+model WorkspacePipelineStage {
+  id           String    @id @default(cuid())
+  workspaceId   String
+  key          String
+  name         String
+  color        String    @default("#25D366")
+  position     Int
+  isSystem     Boolean   @default(false)
+  isTerminal   Boolean   @default(false)
+  terminalType String    @default("OPEN") // OPEN, WON, LOST
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  workspace    Workspace @relation(fields: [workspaceId], references: [id])
+
+  @@unique([workspaceId, key])
+  @@index([workspaceId, position])
 }
 
 model WorkspaceMembership {
@@ -127,8 +146,12 @@ model Contact {
   name          String?
   phoneNumber   String?
   instagramId   String?
+  instagramScopedUserId String?
   instagramUsername String?
+  instagramFollowerCount Int?
+  instagramIsVerifiedUser Boolean?
   avatar        String?
+  lastProfileSyncAt DateTime?
   pipelineStage String    @default("NEW_LEAD") // NEW_LEAD, CONTACTED, QUALIFIED, QUOTE_SENT, WON, LOST
   city          String?
   estimatedValue Float    @default(0)

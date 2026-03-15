@@ -105,8 +105,6 @@ type DashboardSummary = {
   channels: {
     whatsappConnected: number;
     whatsappDisconnected: number;
-    instagramConnected: number;
-    instagramDisconnected: number;
     usage: Array<{
       key: string;
       label: string;
@@ -307,7 +305,6 @@ export default function Dashboard() {
                 <select value={filters.channelType} onChange={(event) => setFilters((prev) => ({ ...prev, channelType: event.target.value }))} className="px-4 py-2.5 rounded-xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm text-gray-900 dark:text-white">
                   <option value="">All channels</option>
                   <option value="WHATSAPP">WhatsApp</option>
-                  <option value="INSTAGRAM">Instagram</option>
                 </select>
                 <select value={filters.leadSource} onChange={(event) => setFilters((prev) => ({ ...prev, leadSource: event.target.value }))} className="px-4 py-2.5 rounded-xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm text-gray-900 dark:text-white">
                   <option value="">All lead sources</option>
@@ -435,11 +432,10 @@ export default function Dashboard() {
                     <StatTile label="Bot Handled" value={formatPercent(summary.chatbot.botHandledRate)} icon={Bot} />
                     <StatTile label="Handoff Rate" value={formatPercent(summary.chatbot.handoffRate)} icon={Users} />
                     <StatTile label="WhatsApp Online" value={summary.channels.whatsappConnected} icon={Hash} />
-                    <StatTile label="Instagram Online" value={summary.channels.instagramConnected} icon={Hash} />
                   </div>
 
                   <div className="mt-6 space-y-3">
-                    {summary.channels.usage.map((item) => (
+                    {summary.channels.usage.filter((item) => item.key !== 'instagram').map((item) => (
                       <div key={item.key}>
                         <div className="flex items-center justify-between text-sm mb-1">
                           <span className="font-medium text-gray-700 dark:text-gray-200">{item.label}</span>
