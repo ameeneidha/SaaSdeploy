@@ -2991,6 +2991,45 @@ async function startServer() {
     }
   });
 
+  app.post("/api/billing/create-portal-session", requireAuth, async (req: any, res) => {
+    if (!stripe) return res.status(500).json({ error: "Stripe not configured" });
+
+    const { workspaceId, returnUrl } = req.body;
+    if (!workspaceId) {
+      return res.status(400).json({ error: "Missing workspaceId" });
+    }
+
+    const membership = await prisma.workspaceMembership.findFirst({
+      where: { workspaceId, userId: req.user.userId },
+      include: { workspace: true },
+    });
+
+    if (!membership) {
+      return res.status(403).json({ error: "Workspace access denied" });
+    }
+
+    if (!['OWNER', 'ADMIN'].includes(String(membership.role || '').toUpperCase())) {
+      return res.status(403).json({ error: "Only workspace owners and admins can manage billing" });
+    }
+
+    const customerId = String(membership.workspace?.stripeCustomerId || '').trim();
+    if (!customerId) {
+      return res.status(400).json({ error: "No Stripe customer is connected to this workspace yet" });
+    }
+
+    try {
+      const session = await stripe.billingPortal.sessions.create({
+        customer: customerId,
+        return_url: String(returnUrl || `${PUBLIC_APP_URL || process.env.APP_URL || 'http://localhost:3000'}/app/settings/billing`),
+      });
+
+      res.json({ url: session.url });
+    } catch (e: any) {
+      console.error('[billing:create-portal-session]', e);
+      res.status(400).json({ error: e?.message || "Could not open Stripe billing portal" });
+    }
+  });
+
   app.post("/api/billing/sync-subscription", requireAuth, async (req: any, res) => {
     if (!stripe) return res.status(500).json({ error: "Stripe not configured" });
     const { workspaceId } = req.body;

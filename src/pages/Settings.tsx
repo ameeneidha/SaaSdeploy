@@ -493,6 +493,14 @@ function Billing() {
   const nextBillingDate = activeWorkspace?.subscriptionCurrentPeriodEnd
     ? new Date(activeWorkspace.subscriptionCurrentPeriodEnd)
     : null;
+  const canManageStripeSubscription =
+    !!activeWorkspace?.stripeCustomerId &&
+    ['active', 'trialing', 'past_due', 'unpaid'].includes(
+      String(activeWorkspace?.subscriptionStatus || '').toLowerCase()
+    );
+  const isPaidWorkspaceWithoutStripePortal =
+    !!currentPlanInfo &&
+    !canManageStripeSubscription;
 
   const fetchBillingData = async () => {
     if (!activeWorkspace?.id) return;
@@ -559,6 +567,25 @@ function Billing() {
       minimumFractionDigits: value > 0 && value < 1 ? 4 : 2,
       maximumFractionDigits: value > 0 && value < 1 ? 4 : 2,
     });
+
+  const openBillingPortal = async () => {
+    if (!activeWorkspace?.id) return;
+
+    try {
+      const res = await axios.post('/api/billing/create-portal-session', {
+        workspaceId: activeWorkspace.id,
+        returnUrl: `${window.location.origin}/app/settings/billing`,
+      });
+      window.location.href = res.data.url;
+    } catch (error) {
+      console.error('Failed to open Stripe billing portal', error);
+      if (axios.isAxiosError(error)) {
+        toast.error(error.response?.data?.error || 'Could not open Stripe billing portal');
+      } else {
+        toast.error('Could not open Stripe billing portal');
+      }
+    }
+  };
 
   return (
     <div className="space-y-12">
@@ -675,9 +702,25 @@ function Billing() {
                     </span>
                   </div>
                 </div>
-                <Link to="/app/settings/billing/plans" className="block w-full py-3 bg-gray-900 dark:bg-slate-800 text-white text-center font-bold rounded-xl hover:bg-gray-800 dark:hover:bg-slate-700 transition-all shadow-sm">
-                  {currentPlanInfo ? 'Change Plan' : 'Choose Your Plan'}
-                </Link>
+                <div className="space-y-3">
+                  <Link to="/app/settings/billing/plans" className="block w-full py-3 bg-gray-900 dark:bg-slate-800 text-white text-center font-bold rounded-xl hover:bg-gray-800 dark:hover:bg-slate-700 transition-all shadow-sm">
+                    {currentPlanInfo ? 'Change Plan' : 'Choose Your Plan'}
+                  </Link>
+                  {canManageStripeSubscription ? (
+                    <button
+                      type="button"
+                      onClick={openBillingPortal}
+                      className="block w-full rounded-xl border border-gray-200 bg-white py-3 text-center font-bold text-gray-700 transition-all hover:border-gray-300 hover:bg-gray-50 dark:border-slate-700 dark:bg-slate-900 dark:text-gray-200 dark:hover:border-slate-600 dark:hover:bg-slate-800"
+                    >
+                      Manage or Cancel Subscription
+                    </button>
+                  ) : null}
+                  {isPaidWorkspaceWithoutStripePortal ? (
+                    <div className="rounded-xl border border-dashed border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-700 dark:border-amber-900/30 dark:bg-amber-900/10 dark:text-amber-300">
+                      This workspace is marked as paid locally, but it is not linked to a real Stripe customer yet, so self-serve cancellation is not available here.
+                    </div>
+                  ) : null}
+                </div>
               </div>
               <div className="bg-white dark:bg-slate-900 p-8 rounded-2xl border border-gray-100 dark:border-slate-800 shadow-sm transition-colors">
                 <div className="flex items-center justify-between mb-6">
