@@ -31,6 +31,7 @@ import WebChatWidget from './pages/WebChatWidget';
 import Integrations from './pages/Integrations';
 import Privacy from './pages/Privacy';
 import Terms from './pages/Terms';
+import DataDeletion from './pages/DataDeletion';
 import NotFound from './pages/NotFound';
 import { Toaster } from 'sonner';
 
@@ -54,6 +55,7 @@ export default function App() {
             <Route path="/careers" element={<Careers />} />
             <Route path="/privacy" element={<Privacy />} />
             <Route path="/terms" element={<Terms />} />
+            <Route path="/data-deletion" element={<DataDeletion />} />
             <Route path="/changelog" element={<Changelog />} />
             <Route path="/app" element={<AppLayout />}>
               <Route index element={<Navigate to="/app/dashboard" replace />} />

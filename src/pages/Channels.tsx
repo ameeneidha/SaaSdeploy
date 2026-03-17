@@ -23,12 +23,23 @@ import { toast } from 'sonner';
 import ActivationChecklist from '../components/ActivationChecklist';
 import { getAllowedMessageOrigins } from '../lib/runtime-config';
 
+type EmbeddedSignupConfig = {
+  enabled: boolean;
+  graphVersion: string;
+  appId: string | null;
+  configId: string | null;
+  callbackUrl: string | null;
+  missingKeys?: string[];
+};
+
 export default function Channels() {
   const { activeWorkspace } = useApp();
   const [numbers, setNumbers] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isConnectingWhatsApp, setIsConnectingWhatsApp] = useState(false);
   const [isFinalizingWhatsApp, setIsFinalizingWhatsApp] = useState(false);
+  const [embeddedSignupConfig, setEmbeddedSignupConfig] = useState<EmbeddedSignupConfig | null>(null);
+  const [isLoadingEmbeddedSignupConfig, setIsLoadingEmbeddedSignupConfig] = useState(false);
 
   const currentPlan = activeWorkspace?.plan || 'NONE';
   const planInfo = getPlanConfig(currentPlan) || PLANS.STARTER;
@@ -39,8 +50,10 @@ export default function Channels() {
   useEffect(() => {
     if (activeWorkspace) {
       fetchChannels();
+      fetchEmbeddedSignupConfig();
     } else {
       setIsLoading(false);
+      setEmbeddedSignupConfig(null);
     }
   }, [activeWorkspace]);
 
@@ -118,6 +131,19 @@ export default function Channels() {
     }
   };
 
+  const fetchEmbeddedSignupConfig = async () => {
+    setIsLoadingEmbeddedSignupConfig(true);
+    try {
+      const response = await axios.get('/api/meta/embedded-signup/config');
+      setEmbeddedSignupConfig(response.data);
+    } catch (error) {
+      console.error('Failed to fetch embedded signup config', error);
+      setEmbeddedSignupConfig(null);
+    } finally {
+      setIsLoadingEmbeddedSignupConfig(false);
+    }
+  };
+
   const handleConnectWhatsApp = async () => {
     if (waLimitReached) {
       toast.error(`Limit reached for ${planInfo.name} plan`);
@@ -126,6 +152,14 @@ export default function Channels() {
 
     if (!activeWorkspace?.id) {
       toast.error('Choose a workspace before connecting WhatsApp');
+      return;
+    }
+
+    if (embeddedSignupConfig && !embeddedSignupConfig.enabled) {
+      const missingKeys = embeddedSignupConfig.missingKeys?.length
+        ? embeddedSignupConfig.missingKeys.join(', ')
+        : 'Meta app credentials';
+      toast.error(`Embedded Signup is not configured yet. Missing: ${missingKeys}`);
       return;
     }
 
@@ -205,6 +239,25 @@ export default function Channels() {
             </button>
           </div>
         </div>
+
+        {!isLoadingEmbeddedSignupConfig && embeddedSignupConfig && !embeddedSignupConfig.enabled && (
+          <div className="mb-8 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-amber-900 shadow-sm dark:border-amber-900/40 dark:bg-amber-950/40 dark:text-amber-100">
+            <div className="flex items-start gap-3">
+              <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" />
+              <div>
+                <h2 className="text-sm font-semibold">Embedded Signup is not configured yet</h2>
+                <p className="mt-1 text-sm text-amber-800 dark:text-amber-200">
+                  Missing Meta environment keys: {(embeddedSignupConfig.missingKeys || []).join(', ') || 'Unknown'}.
+                </p>
+                {embeddedSignupConfig.callbackUrl && (
+                  <p className="mt-2 text-xs text-amber-700 dark:text-amber-300">
+                    Callback URL for Meta: {embeddedSignupConfig.callbackUrl}
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
 
         {!isLoading && numbers.length === 0 && (
           <div className="mb-8 space-y-6">

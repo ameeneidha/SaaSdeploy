@@ -611,6 +611,25 @@ const formatMetaDisplayPhoneNumber = (phoneNumber?: string | null) => {
   return digits ? `+${digits}` : trimmed;
 };
 
+const getEmbeddedSignupRuntimeConfig = () => {
+  const appId = String(process.env.META_APP_ID || '').trim();
+  const appSecret = String(process.env.META_APP_SECRET || '').trim();
+  const configId = String(process.env.META_EMBEDDED_SIGNUP_CONFIG_ID || '').trim();
+  const missingKeys = [
+    !appId ? 'META_APP_ID' : null,
+    !appSecret ? 'META_APP_SECRET' : null,
+    !configId ? 'META_EMBEDDED_SIGNUP_CONFIG_ID' : null,
+  ].filter(Boolean) as string[];
+
+  return {
+    appId,
+    appSecret,
+    configId,
+    missingKeys,
+    enabled: missingKeys.length === 0,
+  };
+};
+
 const escapeHtml = (value: string) =>
   value
     .replace(/&/g, '&amp;')
@@ -2781,11 +2800,13 @@ async function startServer() {
   });
 
   app.get("/api/meta/embedded-signup/config", requireAuth, async (req, res) => {
+    const config = getEmbeddedSignupRuntimeConfig();
     res.json({
-      enabled: Boolean(process.env.META_APP_ID && process.env.META_APP_SECRET && process.env.META_EMBEDDED_SIGNUP_CONFIG_ID),
+      enabled: config.enabled,
       graphVersion: META_GRAPH_VERSION,
-      appId: process.env.META_APP_ID || null,
-      configId: process.env.META_EMBEDDED_SIGNUP_CONFIG_ID || null,
+      appId: config.appId || null,
+      configId: config.configId || null,
+      missingKeys: config.missingKeys,
       callbackUrl: getEmbeddedSignupCallbackUrl(req),
     });
   });
@@ -2797,20 +2818,23 @@ async function startServer() {
     }
 
     return requireSubscribedWorkspaceById(req, res, async () => {
-      const appId = process.env.META_APP_ID;
-      const configId = process.env.META_EMBEDDED_SIGNUP_CONFIG_ID;
+      const config = getEmbeddedSignupRuntimeConfig();
 
-      if (!appId || !process.env.META_APP_SECRET || !configId) {
-        return res.status(400).json({ error: "Embedded Signup is not configured yet" });
+      if (!config.enabled) {
+        return res.status(400).json({
+          error: `Embedded Signup is not configured yet. Missing: ${config.missingKeys.join(', ')}`,
+          missingKeys: config.missingKeys,
+          callbackUrl: getEmbeddedSignupCallbackUrl(req),
+        });
       }
 
       const redirectUri = getEmbeddedSignupCallbackUrl(req);
       const params = new URLSearchParams({
-        client_id: appId,
+        client_id: config.appId,
         redirect_uri: redirectUri,
         state: buildEmbeddedSignupState(workspaceId),
         response_type: 'code',
-        config_id: configId,
+        config_id: config.configId,
         scope: 'business_management,whatsapp_business_management,whatsapp_business_messaging',
       });
 

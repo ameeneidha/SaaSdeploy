@@ -976,6 +976,11 @@ export default function Home() {
                     Terms of Service
                   </Link>
                 </li>
+                <li>
+                  <Link to="/data-deletion" className="transition-colors hover:text-white">
+                    Data Deletion
+                  </Link>
+                </li>
               </ul>
             </div>
 
