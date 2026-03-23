@@ -662,7 +662,10 @@ async function exchangeMetaCodeForAccessToken(code: string, redirectUri: string)
   };
 }
 
-async function fetchEmbeddedSignupPhoneAssets(accessToken: string) {
+async function fetchEmbeddedSignupPhoneAssets(
+  accessToken: string,
+  hints: { businessId?: string | null; wabaId?: string | null } = {}
+) {
   const collected = new Map<string, EmbeddedSignupPhoneAsset>();
   const headers = {
     Authorization: `Bearer ${accessToken}`,
@@ -753,6 +756,73 @@ async function fetchEmbeddedSignupPhoneAssets(accessToken: string) {
     },
   ];
 
+  const normalizedWabaId = String(hints.wabaId || '').trim();
+  const normalizedBusinessId = String(hints.businessId || '').trim();
+
+  if (normalizedWabaId) {
+    queryCandidates.unshift({
+      path: `/${normalizedWabaId}`,
+      params: {
+        fields: 'id,name,phone_numbers{id,display_phone_number,verified_name,whatsapp_business_account_id}',
+      },
+      collect: (data: any) => {
+        const phones = Array.isArray(data?.phone_numbers?.data)
+          ? data.phone_numbers.data
+          : Array.isArray(data?.phone_numbers)
+            ? data.phone_numbers
+            : [];
+        for (const phone of phones) {
+          addPhone(phone, { wabaId: data?.id || normalizedWabaId, businessName: data?.name || null });
+        }
+      },
+    });
+  }
+
+  if (normalizedBusinessId) {
+    queryCandidates.unshift({
+      path: `/${normalizedBusinessId}/owned_whatsapp_business_accounts`,
+      params: {
+        fields: 'id,name,phone_numbers{id,display_phone_number,verified_name,whatsapp_business_account_id}',
+      },
+      collect: (data: any) => {
+        for (const business of Array.isArray(data?.data) ? data.data : []) {
+          const phones = Array.isArray(business?.phone_numbers?.data)
+            ? business.phone_numbers.data
+            : Array.isArray(business?.phone_numbers)
+              ? business.phone_numbers
+              : [];
+          for (const phone of phones) {
+            addPhone(phone, { wabaId: business?.id || null, businessName: business?.name || null });
+          }
+        }
+      },
+    });
+    queryCandidates.unshift({
+      path: `/${normalizedBusinessId}/client_whatsapp_business_accounts`,
+      params: {
+        fields: 'id,name,phone_numbers{id,display_phone_number,verified_name,whatsapp_business_account_id}',
+      },
+      collect: (data: any) => {
+        for (const business of Array.isArray(data?.data) ? data.data : []) {
+          const phones = Array.isArray(business?.phone_numbers?.data)
+            ? business.phone_numbers.data
+            : Array.isArray(business?.phone_numbers)
+              ? business.phone_numbers
+              : [];
+          for (const phone of phones) {
+            addPhone(phone, { wabaId: business?.id || null, businessName: business?.name || null });
+          }
+        }
+      },
+    });
+  }
+
+  console.log('[embedded-signup] asset lookup started', {
+    businessId: normalizedBusinessId || null,
+    wabaId: normalizedWabaId || null,
+    candidateQueries: queryCandidates.map((query) => query.path),
+  });
+
   for (const query of queryCandidates) {
     try {
       const response = await axios.get(`https://graph.facebook.com/${META_GRAPH_VERSION}${query.path}`, {
@@ -764,9 +834,19 @@ async function fetchEmbeddedSignupPhoneAssets(accessToken: string) {
         break;
       }
     } catch (error) {
-      console.warn(`Embedded signup asset lookup failed for ${query.path}`);
+      console.warn(
+        `Embedded signup asset lookup failed for ${query.path}`,
+        error instanceof Error ? error.message : error
+      );
     }
   }
+
+  console.log('[embedded-signup] asset lookup finished', {
+    businessId: normalizedBusinessId || null,
+    wabaId: normalizedWabaId || null,
+    assetCount: collected.size,
+    phoneNumberIds: Array.from(collected.values()).map((asset) => asset.phoneNumberId),
+  });
 
   return Array.from(collected.values()).filter((asset) => asset.displayPhoneNumber || asset.phoneNumberId);
 }
@@ -2854,6 +2934,17 @@ async function startServer() {
     const businessId = String(req.query.business_id || '').trim();
     const businessName = String(req.query.business_name || '').trim();
 
+    console.log('[embedded-signup] callback received', {
+      workspaceId: state?.workspaceId || null,
+      hasCode: Boolean(String(req.query.code || '').trim()),
+      error: error || null,
+      phoneNumberId: phoneNumberId || null,
+      displayPhoneNumber: displayPhoneNumber || null,
+      businessId: businessId || null,
+      businessName: businessName || null,
+      wabaId: wabaId || null,
+    });
+
     if (error) {
       return sendEmbeddedSignupCallbackPage(res, {
         success: false,
@@ -2874,7 +2965,10 @@ async function startServer() {
     try {
       const redirectUri = getEmbeddedSignupCallbackUrl(req);
       const tokenResponse = await exchangeMetaCodeForAccessToken(code, redirectUri);
-      let phoneNumbers = await fetchEmbeddedSignupPhoneAssets(tokenResponse.access_token);
+      let phoneNumbers = await fetchEmbeddedSignupPhoneAssets(tokenResponse.access_token, {
+        businessId: businessId || null,
+        wabaId: wabaId || null,
+      });
 
       if (phoneNumbers.length === 0 && phoneNumberId) {
         phoneNumbers = [
@@ -2888,6 +2982,13 @@ async function startServer() {
       }
 
       if (phoneNumbers.length === 0) {
+        console.warn('[embedded-signup] no phone assets returned after callback', {
+          workspaceId: state?.workspaceId || null,
+          businessId: businessId || null,
+          wabaId: wabaId || null,
+          phoneNumberId: phoneNumberId || null,
+          displayPhoneNumber: displayPhoneNumber || null,
+        });
         return sendEmbeddedSignupCallbackPage(res, {
           success: false,
           error: "Meta connected successfully, but no WhatsApp phone number details were returned",
